@@ -27,6 +27,35 @@ async def index():
     return (STATIC_DIR / "index.html").read_text()
 
 
+@app.get("/api/price")
+async def get_live_price():
+    """Get live EUR/USD price from OANDA."""
+    try:
+        from data.ingestion import get_live_price
+        return get_live_price()
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@app.get("/api/account")
+async def get_oanda_account():
+    """Get OANDA practice account summary."""
+    try:
+        from data.oanda import get_account_summary
+        acct = get_account_summary()
+        return {
+            "balance": float(acct["balance"]),
+            "unrealized_pnl": float(acct.get("unrealizedPL", 0)),
+            "nav": float(acct.get("NAV", acct["balance"])),
+            "margin_used": float(acct.get("marginUsed", 0)),
+            "margin_available": float(acct.get("marginAvailable", acct["balance"])),
+            "open_trades": int(acct.get("openTradeCount", 0)),
+            "currency": acct.get("currency", "GBP"),
+        }
+    except Exception as e:
+        return {"error": str(e)}
+
+
 @app.get("/api/status")
 async def get_status():
     session = get_session()
@@ -41,6 +70,15 @@ async def get_status():
             SignalRecord.timestamp >= datetime.utcnow().replace(hour=0, minute=0)
         ).count()
 
+        # Get live price
+        live_price = None
+        try:
+            from data.ingestion import get_live_price
+            price_data = get_live_price()
+            live_price = price_data.get("mid")
+        except Exception:
+            pass
+
         return {
             "pair": PAIR_NAME,
             "capital": round(STARTING_CAPITAL + total_pnl, 2),
@@ -49,6 +87,7 @@ async def get_status():
             "closed_positions": closed_positions,
             "total_pnl": round(total_pnl, 2),
             "signals_today": signals_today,
+            "live_price": live_price,
         }
     finally:
         session.close()

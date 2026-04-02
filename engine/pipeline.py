@@ -8,7 +8,7 @@ from agents.signal_generator import SignalGeneratorAgent
 from agents.risk_manager import RiskManagerAgent
 from agents.executor import ExecutorAgent
 from agents.learner import LearnerAgent
-from data.ingestion import fetch_candles, load_candles, save_candles
+from data.ingestion import fetch_candles, load_candles, save_candles, get_live_price
 from data.models import Candle
 from engine.event_bus import bus
 from config.settings import PAIR, TIMEFRAMES, TIMEFRAME_MINUTES
@@ -33,11 +33,31 @@ class TradingPipeline:
         bus.subscribe("position_closed", self._on_position_closed)
 
     def setup(self):
-        """Initialize all agents."""
+        """Initialize all agents and load optimized parameters."""
         for agent in [self.analyzer, self.signal_gen, self.risk_mgr,
                       self.executor, self.learner]:
             agent.setup()
         self.learner.load_stats_from_db()
+
+        # Load optimized parameters
+        try:
+            from backtest.optimizer import apply_optimized_params
+            if apply_optimized_params():
+                # Update signal generator weights
+                from config.settings import CONFLUENCE_WEIGHTS
+                self.signal_gen.update_weights(CONFLUENCE_WEIGHTS)
+        except Exception as e:
+            logger.warning(f"Could not load optimized params: {e}")
+
+        # Sync capital with OANDA account
+        try:
+            from data.oanda import get_account_summary
+            acct = get_account_summary()
+            self.risk_mgr.capital = float(acct["balance"])
+            logger.info(f"OANDA balance: £{self.risk_mgr.capital:,.2f}")
+        except Exception as e:
+            logger.warning(f"Could not sync OANDA balance: {e}")
+
         logger.info("Trading pipeline initialized")
 
     def run_once(self) -> dict:
@@ -64,12 +84,15 @@ class TradingPipeline:
         if not context:
             return summary
 
-        # 3. Check existing positions against current price
-        current_price = 0
-        for tf in ["15m", "1h", "4h", "1d"]:
-            if tf in context.analyses:
-                current_price = context.analyses[tf].current_price
-                break
+        # 3. Check existing positions against current live price
+        live = get_live_price()
+        current_price = live.get("mid", 0) if live else 0
+
+        if current_price == 0:
+            for tf in ["15m", "1h", "4h", "1d"]:
+                if tf in context.analyses:
+                    current_price = context.analyses[tf].current_price
+                    break
 
         if current_price > 0:
             self.risk_mgr.update_positions(current_price)

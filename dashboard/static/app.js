@@ -26,6 +26,18 @@ function loadTabData(tab) {
     }
 }
 
+// Live price ticker
+async function loadLivePrice() {
+    try {
+        const res = await fetch(`${API}/api/price`);
+        const data = await res.json();
+        if (data.mid) {
+            document.getElementById('live-price').textContent = `EUR/USD: ${data.mid.toFixed(5)}`;
+            document.getElementById('live-price').title = `Bid: ${data.bid.toFixed(5)} | Ask: ${data.ask.toFixed(5)} | Spread: ${(data.spread*10000).toFixed(1)} pips`;
+        }
+    } catch(e) {}
+}
+
 // Status bar
 async function loadStatus() {
     try {
@@ -37,6 +49,10 @@ async function loadStatus() {
         pnlEl.textContent = `P&L: \u00a3${data.total_pnl >= 0 ? '+' : ''}${data.total_pnl.toLocaleString()}`;
         pnlEl.className = data.total_pnl >= 0 ? 'positive' : 'negative';
 
+        if (data.live_price) {
+            document.getElementById('live-price').textContent = `EUR/USD: ${data.live_price.toFixed(5)}`;
+        }
+
         document.getElementById('open-pos').textContent = `Open: ${data.open_positions}`;
         document.getElementById('signals-today').textContent = `Signals: ${data.signals_today}`;
         document.getElementById('last-update').textContent = `Updated: ${new Date().toLocaleTimeString()}`;
@@ -45,9 +61,40 @@ async function loadStatus() {
     }
 }
 
+// OANDA account summary
+async function loadOandaAccount() {
+    try {
+        const res = await fetch(`${API}/api/account`);
+        const data = await res.json();
+        if (data.error) {
+            document.getElementById('oanda-account').innerHTML = `<p class="neutral">${data.error}</p>`;
+            return;
+        }
+        const unrealizedClass = data.unrealized_pnl >= 0 ? 'positive' : 'negative';
+        const stats = [
+            ['Balance', `\u00a3${data.balance.toLocaleString()}`],
+            ['NAV', `\u00a3${data.nav.toLocaleString()}`],
+            ['Unrealized P&L', `\u00a3${data.unrealized_pnl >= 0 ? '+' : ''}${data.unrealized_pnl.toFixed(2)}`],
+            ['Margin Used', `\u00a3${data.margin_used.toFixed(2)}`],
+            ['Margin Available', `\u00a3${data.margin_available.toLocaleString()}`],
+            ['Open Trades', data.open_trades],
+        ];
+        let html = '';
+        for (const [label, value] of stats) {
+            const cls = label === 'Unrealized P&L' ? unrealizedClass : '';
+            html += `<div class="stat-row"><span class="stat-label">${label}</span><span class="stat-value ${cls}">${value}</span></div>`;
+        }
+        document.getElementById('oanda-account').innerHTML = html;
+    } catch(e) {
+        document.getElementById('oanda-account').innerHTML = '<p class="neutral">OANDA not connected</p>';
+    }
+}
+
 // Overview tab
 async function loadOverview() {
     loadStatus();
+    loadLivePrice();
+    loadOandaAccount();
     loadEquityCurve();
     loadRecentSignals();
     loadOpenPositions();
@@ -337,11 +384,14 @@ async function loadLearning() {
 
 // Initial load
 loadOverview();
-loadAccountSummary();
 
-// Auto-refresh every 60 seconds
+// Live price refresh every 5 seconds
+setInterval(loadLivePrice, 5000);
+
+// Full data refresh every 30 seconds
 setInterval(() => {
     loadStatus();
+    loadOandaAccount();
     const activeTab = document.querySelector('.tab.active')?.dataset.tab;
     if (activeTab) loadTabData(activeTab);
-}, 60000);
+}, 30000);

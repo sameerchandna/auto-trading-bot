@@ -113,17 +113,33 @@ def analyze():
 
 @app.command()
 def run(
-    interval: int = typer.Option(300, help="Loop interval in seconds (default 5min)"),
+    interval: int = typer.Option(60, help="Loop interval in seconds (default 60s)"),
 ):
-    """Start the trading bot (paper trading)."""
+    """Start the trading bot on OANDA practice account."""
     setup_logging()
     from engine.pipeline import TradingPipeline
 
+    # Show OANDA account info
+    try:
+        from data.oanda import get_account_summary, get_current_price
+        acct = get_account_summary()
+        price = get_current_price()
+        console.print(Panel(
+            f"OANDA Practice Account Connected\n"
+            f"Balance: \u00a3{float(acct['balance']):,.2f}\n"
+            f"EUR/USD: {price['mid']:.5f} (spread: {price['spread']*10000:.1f} pips)\n"
+            f"Tradeable: {price['tradeable']}",
+            title="OANDA",
+            style="green",
+        ))
+    except Exception as e:
+        console.print(f"[yellow]OANDA not available: {e}[/]")
+
     console.print(Panel(
         f"Starting {PAIR_NAME} Trading Bot\n"
-        f"Capital: \u00a3{STARTING_CAPITAL:,}\n"
-        f"Mode: Paper Trading\n"
-        f"Interval: {interval}s",
+        f"Mode: OANDA Practice Account\n"
+        f"Interval: {interval}s\n"
+        f"Risk: 2% per trade, max 3 positions",
         title="Trading Bot",
         style="green",
     ))

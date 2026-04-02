@@ -1,5 +1,6 @@
 """Backtesting engine - replay historical data through the pipeline."""
 import logging
+from bisect import bisect_right
 from datetime import datetime, timedelta
 
 from data.models import Candle, Position, Direction, TradeStatus
@@ -11,6 +12,12 @@ from backtest.metrics import calculate_metrics
 from config.settings import PAIR, TIMEFRAMES, CONFLUENCE_WEIGHTS
 
 logger = logging.getLogger(__name__)
+
+
+def _bisect_candles(candles: list, target_date: datetime) -> int:
+    """Find index of last candle with timestamp <= target_date."""
+    timestamps = [c.timestamp for c in candles]
+    return bisect_right(timestamps, target_date)
 
 
 class BacktestEngine:
@@ -44,15 +51,24 @@ class BacktestEngine:
             f"Capital: £{self.initial_capital}"
         )
 
-        # Fetch historical data for all timeframes
+        # Load historical data from cache first, fetch only if missing
         all_candles = {}
         for tf in TIMEFRAMES:
-            candles = fetch_candles(
-                pair=PAIR, timeframe=tf,
+            candles = load_candles(
+                pair=PAIR, timeframe=tf, limit=10000,
                 start=self.start_date, end=self.end_date,
             )
+            if not candles:
+                try:
+                    candles = fetch_candles(
+                        pair=PAIR, timeframe=tf,
+                        start=self.start_date, end=self.end_date,
+                    )
+                    if candles:
+                        save_candles(candles, PAIR)
+                except Exception as e:
+                    logger.debug(f"Fetch failed for {tf}: {e}")
             if candles:
-                save_candles(candles, PAIR)
                 all_candles[tf] = candles
                 logger.info(f"  {tf}: {len(candles)} candles loaded")
 
@@ -70,18 +86,32 @@ class BacktestEngine:
         iter_candles = all_candles[iter_tf]
         logger.info(f"Iterating on {iter_tf} ({len(iter_candles)} candles)")
 
-        # Walk forward through each candle
-        step = max(1, len(iter_candles) // 500)  # Sample ~500 points for speed
+        # Pre-sort all candles by timestamp for faster windowing
+        sorted_candles = {}
+        for tf, candles in all_candles.items():
+            sorted_candles[tf] = sorted(candles, key=lambda c: c.timestamp)
+
+        # Walk forward through every 4th candle (4h effective sampling on 1h data)
+        step = 4 if iter_tf == "1h" else 1
+        last_date = None
         for i in range(50, len(iter_candles), step):
             current_date = iter_candles[i].timestamp
             current_price = iter_candles[i].close
 
-            # Build candle windows for each timeframe
+            # Reset daily P&L on new day
+            if last_date is None or current_date.date() != last_date.date():
+                self.risk_mgr._reset_daily_weekly()
+                self.risk_mgr.last_daily_reset = current_date.date()
+            last_date = current_date
+
+            # Build candle windows for each timeframe using binary search
             candle_windows = {}
-            for tf, candles in all_candles.items():
-                window = [c for c in candles if c.timestamp <= current_date]
-                if window:
-                    candle_windows[tf] = window[-200:]  # Keep last 200
+            for tf, candles in sorted_candles.items():
+                idx = _bisect_candles(candles, current_date)
+                if idx > 0:
+                    window = candles[max(0, idx - 200):idx]
+                    if window:
+                        candle_windows[tf] = window
 
             if not candle_windows:
                 continue

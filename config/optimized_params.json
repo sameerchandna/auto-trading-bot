@@ -1,0 +1,25 @@
+{
+  "weights": {
+    "htf_bias": 0.3338,
+    "bos": 0.1017,
+    "wave_position": 0.1539,
+    "liquidity_sweep": 0.193,
+    "sr_reaction": 0.1604,
+    "wave_ending": 0.0572,
+    "catalyst": 0.0
+  },
+  "threshold": 0.30,
+  "sl_multiplier": 1.0,
+  "tp_risk_reward": 2.0,
+  "swing_lookback": 6,
+  "backtest_results": {
+    "period": "2025-01-01 to 2025-12-31",
+    "total_trades": 49,
+    "win_rate": 0.47,
+    "expectancy_pips": 7.7,
+    "total_pnl_gbp": 7574,
+    "max_drawdown_pct": 0.049,
+    "profit_factor": 1.61,
+    "optimizer_trials": "29/30 profitable"
+  }
+}
