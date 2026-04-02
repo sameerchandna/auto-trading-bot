@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>EURUSD Trading Bot</title>
+    <script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
+    <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+    <header>
+        <h1>EURUSD Trading Bot</h1>
+        <div id="status-bar">
+            <span id="capital">Capital: --</span>
+            <span id="pnl">P&L: --</span>
+            <span id="open-pos">Open: --</span>
+            <span id="signals-today">Signals: --</span>
+            <span id="last-update">Updated: --</span>
+        </div>
+    </header>
+
+    <nav>
+        <button class="tab active" data-tab="overview">Market Overview</button>
+        <button class="tab" data-tab="trades">Trades</button>
+        <button class="tab" data-tab="chart">Chart</button>
+        <button class="tab" data-tab="backtest">Backtests</button>
+        <button class="tab" data-tab="learning">Learning</button>
+    </nav>
+
+    <main>
+        <!-- Market Overview -->
+        <section id="overview" class="tab-content active">
+            <div class="grid">
+                <div class="card">
+                    <h3>Account Summary</h3>
+                    <div id="account-summary">Loading...</div>
+                </div>
+                <div class="card">
+                    <h3>Equity Curve</h3>
+                    <div id="equity-chart"></div>
+                </div>
+                <div class="card">
+                    <h3>Recent Signals</h3>
+                    <div id="recent-signals">Loading...</div>
+                </div>
+                <div class="card">
+                    <h3>Open Positions</h3>
+                    <div id="open-positions">Loading...</div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Trades -->
+        <section id="trades" class="tab-content">
+            <div class="card full-width">
+                <h3>Trade History</h3>
+                <table id="trades-table">
+                    <thead>
+                        <tr>
+                            <th>#</th>
+                            <th>Direction</th>
+                            <th>Type</th>
+                            <th>Entry</th>
+                            <th>Exit</th>
+                            <th>SL</th>
+                            <th>TP</th>
+                            <th>P&L Pips</th>
+                            <th>P&L £</th>
+                            <th>Score</th>
+                            <th>Status</th>
+                            <th>Opened</th>
+                        </tr>
+                    </thead>
+                    <tbody id="trades-body"></tbody>
+                </table>
+            </div>
+        </section>
+
+        <!-- Chart -->
+        <section id="chart" class="tab-content">
+            <div class="card full-width">
+                <div class="chart-controls">
+                    <select id="tf-select">
+                        <option value="15m">15 Min</option>
+                        <option value="1h">1 Hour</option>
+                        <option value="4h" selected>4 Hour</option>
+                        <option value="1d">Daily</option>
+                        <option value="1wk">Weekly</option>
+                    </select>
+                </div>
+                <div id="price-chart" style="height: 500px;"></div>
+            </div>
+        </section>
+
+        <!-- Backtests -->
+        <section id="backtest" class="tab-content">
+            <div class="card full-width">
+                <h3>Backtest Results</h3>
+                <table id="backtest-table">
+                    <thead>
+                        <tr>
+                            <th>#</th>
+                            <th>Date</th>
+                            <th>Period</th>
+                            <th>Trades</th>
+                            <th>Win Rate</th>
+                            <th>P&L</th>
+                            <th>Max DD</th>
+                            <th>Sharpe</th>
+                        </tr>
+                    </thead>
+                    <tbody id="backtest-body"></tbody>
+                </table>
+            </div>
+        </section>
+
+        <!-- Learning -->
+        <section id="learning" class="tab-content">
+            <div class="grid">
+                <div class="card">
+                    <h3>Setup Performance</h3>
+                    <div id="setup-stats">Loading...</div>
+                </div>
+                <div class="card">
+                    <h3>Parameter Evolution</h3>
+                    <div id="param-chart"></div>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <script src="/static/app.js"></script>
+</body>
+</html>
