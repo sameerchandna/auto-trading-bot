@@ -148,6 +148,11 @@ tr:hover {
 .badge-short { background: #7f1d1d; color: #f87171; }
 .badge-open { background: #1e3a5f; color: #60a5fa; }
 .badge-closed { background: #1e293b; color: #94a3b8; }
+.badge-win { background: #065f46; color: #34d399; }
+.badge-loss { background: #7f1d1d; color: #f87171; }
+.badge-be { background: #713f12; color: #fbbf24; }
+.badge-bt { background: #312e81; color: #a78bfa; }
+.badge-live { background: #064e3b; color: #6ee7b7; }
 
 .stat-row {
     display: flex;
@@ -159,8 +164,33 @@ tr:hover {
 .stat-label { color: #94a3b8; font-size: 13px; }
 .stat-value { font-weight: 600; font-size: 14px; }
 
-.chart-controls {
+.tf-buttons {
+    display: flex;
+    gap: 6px;
     margin-bottom: 12px;
+}
+
+.tf-btn {
+    background: #1e293b;
+    color: #94a3b8;
+    border: 1px solid #334155;
+    padding: 8px 18px;
+    border-radius: 4px;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.15s;
+}
+
+.tf-btn:hover {
+    background: #334155;
+    color: #e0e6ed;
+}
+
+.tf-btn.active {
+    background: #1d4ed8;
+    color: #fff;
+    border-color: #3b82f6;
 }
 
 select {
@@ -199,6 +229,28 @@ select {
     border-radius: 2px;
     transition: width 0.3s;
 }
+
+.compare-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+}
+.compare-table th {
+    background: #1e293b;
+    padding: 8px 14px;
+    text-align: left;
+    color: #94a3b8;
+    font-weight: 600;
+    white-space: nowrap;
+    border-bottom: 1px solid #334155;
+}
+.compare-table td {
+    padding: 7px 14px;
+    border-bottom: 1px solid #0f172a;
+    white-space: nowrap;
+}
+.compare-table tr:hover td { background: #0f172a; }
+.compare-metric { color: #94a3b8; font-size: 12px; }
 
 @media (max-width: 768px) {
     .grid { grid-template-columns: 1fr; }

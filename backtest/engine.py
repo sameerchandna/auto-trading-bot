@@ -9,6 +9,7 @@ from analysis.context import build_price_context
 from analysis.confluence import score_confluence
 from agents.risk_manager import RiskManagerAgent, PIP_VALUE
 from backtest.metrics import calculate_metrics
+from backtest.config import BacktestConfig, BASELINE
 from config.settings import PAIR, TIMEFRAMES, CONFLUENCE_WEIGHTS
 
 logger = logging.getLogger(__name__)
@@ -28,15 +29,19 @@ class BacktestEngine:
         start_date: datetime,
         end_date: datetime,
         initial_capital: float = 10_000,
+        config: BacktestConfig | None = None,
     ):
         self.start_date = start_date
         self.end_date = end_date
         self.initial_capital = initial_capital
+        self.config = config or BASELINE
         self.risk_mgr = RiskManagerAgent()
         self.risk_mgr.capital = initial_capital
 
         self.equity_curve: list[tuple[datetime, float]] = []
         self.all_trades: list[Position] = []
+        self._consecutive_losses: int = 0
+        self._cooldown_remaining: int = 0
 
     def run(self, weights: dict | None = None) -> dict:
         """Run the backtest.
@@ -98,6 +103,9 @@ class BacktestEngine:
             current_date = iter_candles[i].timestamp
             current_price = iter_candles[i].close
 
+            # Set simulated time so positions get correct timestamps
+            self.risk_mgr._simulated_time = current_date
+
             # Reset daily P&L on new day
             if last_date is None or current_date.date() != last_date.date():
                 self.risk_mgr._reset_daily_weekly()
@@ -126,8 +134,25 @@ class BacktestEngine:
             # Update existing positions
             self.risk_mgr.update_positions(current_price)
 
+            # Track consecutive losses for cooldown
+            if not hasattr(self, '_tracked_closed_count'):
+                self._tracked_closed_count = 0
+            prev_count = self._tracked_closed_count
+            current_closed = self.risk_mgr.closed_positions
+            for p in current_closed[prev_count:]:
+                if p.pnl < 0:
+                    self._consecutive_losses += 1
+                    if self.config.cooldown_after_losses and self._consecutive_losses >= self.config.cooldown_after_losses:
+                        self._cooldown_remaining = self.config.cooldown_after_losses
+                else:
+                    self._consecutive_losses = 0
+            self._tracked_closed_count = len(current_closed)
+
             # Generate signals
             signals = score_confluence(context, weights)
+
+            # Apply config filters before execution
+            signals = self._apply_filters(signals, current_date)
 
             # Risk manage and "execute"
             for signal in signals:
@@ -151,6 +176,7 @@ class BacktestEngine:
         # Collect results
         closed = self.risk_mgr.closed_positions
         self.all_trades.extend(closed)
+        self.risk_mgr._simulated_time = None
 
         metrics = calculate_metrics(
             closed,
@@ -173,4 +199,42 @@ class BacktestEngine:
             "trades": len(closed),
             "start_date": self.start_date.isoformat(),
             "end_date": self.end_date.isoformat(),
+            "config_label": self.config.label(),
         }
+
+    def _apply_filters(self, signals: list, current_date: datetime) -> list:
+        """Apply BacktestConfig rules to filter signals before execution."""
+        cfg = self.config
+        if not signals:
+            return signals
+
+        # Cooldown: skip signals after too many consecutive losses
+        if cfg.cooldown_after_losses and self._cooldown_remaining > 0:
+            self._cooldown_remaining -= 1
+            logger.debug(f"Cooldown active ({self._cooldown_remaining} remaining) — skipping {len(signals)} signal(s)")
+            return []
+
+        # Time filters
+        if cfg.block_hours and current_date.hour in cfg.block_hours:
+            return []
+        if cfg.block_days and current_date.weekday() in cfg.block_days:
+            return []
+
+        filtered = []
+        for signal in signals:
+            # Confluence score threshold
+            if signal.confluence_score < cfg.min_score:
+                continue
+
+            # No-overlap: block same-direction entry if already in a position
+            if cfg.no_overlap:
+                same_dir_open = any(
+                    p.signal.direction == signal.direction
+                    for p in self.risk_mgr.open_positions
+                )
+                if same_dir_open:
+                    continue
+
+            filtered.append(signal)
+
+        return filtered

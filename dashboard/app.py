@@ -63,7 +63,10 @@ async def get_status():
         open_positions = session.query(PositionRecord).filter_by(status="open").count()
         closed_positions = session.query(PositionRecord).filter_by(status="closed").count()
         total_pnl = sum(
-            r.pnl for r in session.query(PositionRecord).filter_by(status="closed").all()
+            r.pnl for r in session.query(PositionRecord)
+            .filter_by(status="closed")
+            .filter(~PositionRecord.tags.contains('"backtest"'))
+            .all()
             if r.pnl
         )
         signals_today = session.query(SignalRecord).filter(
@@ -94,24 +97,78 @@ async def get_status():
 
 
 @app.get("/api/trades")
-async def get_trades(limit: int = 50, offset: int = 0):
+async def get_trades(limit: int = 2000, offset: int = 0, source: str = "live", bt_id: int = 0):
     session = get_session()
     try:
+        from storage.database import TradeJournalRecord
+
+        query = session.query(PositionRecord)
+        if bt_id > 0:
+            query = query.filter(PositionRecord.tags.contains(f'"bt_{bt_id}"'))
+        elif source == "backtest":
+            query = query.filter(PositionRecord.tags.contains('"backtest"'))
+        else:
+            # live: exclude all backtest trades
+            query = query.filter(~PositionRecord.tags.contains('"backtest"'))
+
         trades = (
-            session.query(PositionRecord)
+            query
             .order_by(PositionRecord.opened_at.desc())
             .offset(offset)
             .limit(limit)
             .all()
         )
-        return [
-            {
+
+        # Bulk load journal entries for duration/MFE/MAE
+        trade_ids = [t.id for t in trades]
+        journals = {
+            j.position_id: j
+            for j in session.query(TradeJournalRecord)
+            .filter(TradeJournalRecord.position_id.in_(trade_ids))
+            .all()
+        } if trade_ids else {}
+
+        result = []
+        for t in trades:
+            # Compute win/loss
+            if t.status == "closed" and t.pnl is not None:
+                outcome = "win" if t.pnl > 0 else ("loss" if t.pnl < 0 else "breakeven")
+            else:
+                outcome = None
+
+            # Compute planned RR from entry/SL/TP
+            planned_rr = None
+            if t.entry_price and t.stop_loss and t.take_profit:
+                sl_dist = abs(t.entry_price - t.stop_loss)
+                tp_dist = abs(t.take_profit - t.entry_price)
+                if sl_dist > 0:
+                    planned_rr = round(tp_dist / sl_dist, 2)
+
+            # Compute actual RR (how much R was captured)
+            actual_rr = None
+            if t.status == "closed" and t.pnl is not None and t.risk_amount and t.risk_amount > 0:
+                actual_rr = round(t.pnl / t.risk_amount, 2)
+
+            # Duration
+            duration_mins = None
+            journal = journals.get(t.id)
+            if journal and journal.duration_minutes:
+                duration_mins = journal.duration_minutes
+            elif t.opened_at and t.closed_at:
+                duration_mins = int((t.closed_at - t.opened_at).total_seconds() / 60)
+
+            # MFE/MAE from journal
+            max_favorable = journal.max_favorable if journal else None
+            max_adverse = journal.max_adverse if journal else None
+
+            result.append({
                 "id": t.id,
                 "direction": t.direction,
                 "status": t.status,
                 "entry_price": t.entry_price,
                 "exit_price": t.exit_price,
                 "size": t.size,
+                "risk_amount": t.risk_amount,
                 "pnl": t.pnl,
                 "pnl_pips": t.pnl_pips,
                 "opened_at": t.opened_at.isoformat() if t.opened_at else None,
@@ -120,9 +177,16 @@ async def get_trades(limit: int = 50, offset: int = 0):
                 "confluence_score": t.confluence_score,
                 "stop_loss": t.stop_loss,
                 "take_profit": t.take_profit,
-            }
-            for t in trades
-        ]
+                "outcome": outcome,
+                "planned_rr": planned_rr,
+                "actual_rr": actual_rr,
+                "duration_mins": duration_mins,
+                "max_favorable": max_favorable,
+                "max_adverse": max_adverse,
+                "tags": json.loads(t.tags) if t.tags else [],
+            })
+
+        return result
     finally:
         session.close()
 
@@ -215,23 +279,79 @@ async def get_backtests():
         runs = (
             session.query(BacktestRecord)
             .order_by(BacktestRecord.timestamp.desc())
-            .limit(10)
+            .limit(50)
             .all()
         )
-        return [
-            {
+        result = []
+        for r in runs:
+            params = json.loads(r.params_json) if r.params_json else {}
+            metrics = json.loads(r.results_json) if r.results_json else {}
+            result.append({
                 "id": r.id,
                 "timestamp": r.timestamp.isoformat(),
                 "start_date": r.start_date.isoformat(),
                 "end_date": r.end_date.isoformat(),
+                "config": params.get("config", "baseline"),
                 "total_trades": r.total_trades,
                 "win_rate": r.win_rate,
                 "total_pnl": r.total_pnl,
                 "max_drawdown": r.max_drawdown,
                 "sharpe_ratio": r.sharpe_ratio,
-            }
-            for r in runs
-        ]
+                "wins": metrics.get("wins", 0),
+                "losses": metrics.get("losses", 0),
+                "profit_factor": metrics.get("profit_factor", 0),
+                "expectancy_pips": metrics.get("expectancy_pips", 0),
+                "avg_win_pips": metrics.get("avg_win_pips", 0),
+                "avg_loss_pips": metrics.get("avg_loss_pips", 0),
+                "consecutive_losses": metrics.get("consecutive_losses", 0),
+                "sortino_ratio": metrics.get("sortino_ratio", 0),
+            })
+        return result
+    finally:
+        session.close()
+
+
+@app.get("/api/compare")
+async def get_comparisons():
+    """Group backtest runs into baseline/variant pairs for comparison view."""
+    session = get_session()
+    try:
+        runs = (
+            session.query(BacktestRecord)
+            .order_by(BacktestRecord.timestamp.asc())
+            .all()
+        )
+
+        # Group by (start_date, end_date) — runs on the same period can be compared
+        from collections import defaultdict
+        groups: dict = defaultdict(list)
+        for r in runs:
+            params = json.loads(r.params_json) if r.params_json else {}
+            metrics = json.loads(r.results_json) if r.results_json else {}
+            period = f"{r.start_date.date()} to {r.end_date.date()}"
+            groups[period].append({
+                "id": r.id,
+                "timestamp": r.timestamp.isoformat(),
+                "config": params.get("config", "baseline"),
+                "total_trades": r.total_trades,
+                "win_rate": r.win_rate,
+                "total_pnl": r.total_pnl,
+                "max_drawdown": r.max_drawdown,
+                "sharpe_ratio": r.sharpe_ratio,
+                "wins": metrics.get("wins", 0),
+                "losses": metrics.get("losses", 0),
+                "profit_factor": metrics.get("profit_factor", 0),
+                "expectancy_pips": metrics.get("expectancy_pips", 0),
+                "avg_win_pips": metrics.get("avg_win_pips", 0),
+                "avg_loss_pips": metrics.get("avg_loss_pips", 0),
+                "consecutive_losses": metrics.get("consecutive_losses", 0),
+            })
+
+        # Return groups with >1 run (i.e. have a comparison) first, then singles
+        result = []
+        for period, group_runs in sorted(groups.items(), key=lambda x: len(x[1]), reverse=True):
+            result.append({"period": period, "runs": group_runs})
+        return result
     finally:
         session.close()
 

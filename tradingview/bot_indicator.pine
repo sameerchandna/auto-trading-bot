@@ -1,0 +1,470 @@
+//@version=5
+indicator("EURUSD Auto Bot - Multi-TF Signals", overlay=true, max_labels_count=500, max_lines_count=500, max_boxes_count=200)
+
+// ============================================
+// INPUTS
+// Best viewed on 1H chart (matches bot entry TF)
+// ============================================
+swing_lookback  = input.int(6, "Swing Lookback", minval=2, maxval=15, group="Structure")
+show_swings     = input.bool(true, "Show Swing Points", group="Display")
+show_bos        = input.bool(true, "Show BOS / CHoCH", group="Display")
+show_sr         = input.bool(true, "Show S/R Zones", group="Display")
+show_signals    = input.bool(true, "Show Entry Signals", group="Display")
+show_wave       = input.bool(true, "Show Wave Phase", group="Display")
+show_htf        = input.bool(true, "Show HTF Bias Background", group="Display")
+
+// Confluence weights (optimized params from bot)
+w_htf_bias      = input.float(0.334, "HTF Bias Weight", step=0.01, group="Confluence")
+w_bos           = input.float(0.102, "BOS Weight", step=0.01, group="Confluence")
+w_wave          = input.float(0.154, "Wave Position Weight", step=0.01, group="Confluence")
+w_liquidity     = input.float(0.193, "Liquidity Sweep Weight", step=0.01, group="Confluence")
+w_sr            = input.float(0.160, "S/R Reaction Weight", step=0.01, group="Confluence")
+w_wave_end      = input.float(0.057, "Wave Ending Weight", step=0.01, group="Confluence")
+confluence_thr  = input.float(0.30, "Confluence Threshold", step=0.05, group="Confluence")
+
+sl_atr_mult     = input.float(1.0, "SL ATR Multiplier", step=0.1, group="Risk")
+tp_rr           = input.float(2.0, "TP Risk:Reward", step=0.5, group="Risk")
+atr_period      = input.int(14, "ATR Period", group="Risk")
+
+// Colors
+col_bull        = color.new(#34d399, 0)
+col_bear        = color.new(#f87171, 0)
+col_bos         = color.new(#60a5fa, 0)
+col_choch       = color.new(#fbbf24, 0)
+col_sr_support  = color.new(#34d399, 80)
+col_sr_resist   = color.new(#f87171, 80)
+
+// ============================================
+// MTF FUNCTIONS (var-free for request.security)
+// Uses ta.pivothigh/ta.pivotlow/ta.valuewhen
+// ============================================
+
+// Bias: HH+HL = bullish(1), LH+LL = bearish(-1), else ranging(0)
+f_mtf_bias(_lb) =>
+    ph = ta.pivothigh(high, _lb, _lb)
+    pl = ta.pivotlow(low, _lb, _lb)
+    lsh = ta.valuewhen(not na(ph), ph, 0)
+    psh = ta.valuewhen(not na(ph), ph, 1)
+    lsl = ta.valuewhen(not na(pl), pl, 0)
+    psl = ta.valuewhen(not na(pl), pl, 1)
+    ok = not na(lsh) and not na(psh) and not na(lsl) and not na(psl)
+    ok ? (lsh > psh and lsl > psl ? 1 : lsh < psh and lsl < psl ? -1 : 0) : 0
+
+// Structure: [bias, break_state]
+// break_state: 1=BOS (with trend), -1=CHoCH (against trend), 0=none
+f_mtf_structure(_lb) =>
+    ph = ta.pivothigh(high, _lb, _lb)
+    pl = ta.pivotlow(low, _lb, _lb)
+    lsh = ta.valuewhen(not na(ph), ph, 0)
+    psh = ta.valuewhen(not na(ph), ph, 1)
+    lsl = ta.valuewhen(not na(pl), pl, 0)
+    psl = ta.valuewhen(not na(pl), pl, 1)
+    ok = not na(lsh) and not na(psh) and not na(lsl) and not na(psl)
+    b = ok ? (lsh > psh and lsl > psl ? 1 : lsh < psh and lsl < psl ? -1 : 0) : 0
+    // Break state: price past a swing level?
+    above_sh = not na(lsh) and close > lsh
+    below_sl = not na(lsl) and close < lsl
+    is_bos = (b == 1 and above_sh) or (b == -1 and below_sl)
+    is_choch = (b == -1 and above_sh) or (b == 1 and below_sl)
+    brk = is_bos ? 1 : is_choch ? -1 : 0
+    [b, brk]
+
+// Wave: [is_correction, efficiency]
+f_mtf_wave() =>
+    wl = 20
+    nm = math.abs(close - close[wl])
+    tm = math.sum(math.abs(close - close[1]), wl)
+    eff = tm > 0 ? nm / tm : 0.0
+    ab = ta.sma(math.abs(close - open), wl)
+    ar = ta.sma(high - low, wl)
+    br = ar > 0 ? ab / ar : 0.0
+    is_corr = not (eff > 0.3 and br > 0.4)
+    [is_corr, eff]
+
+// S/R levels: [last_swing_high, last_swing_low]
+f_mtf_sr(_lb) =>
+    ph = ta.pivothigh(high, _lb, _lb)
+    pl = ta.pivotlow(low, _lb, _lb)
+    [ta.valuewhen(not na(ph), ph, 0), ta.valuewhen(not na(pl), pl, 0)]
+
+// ============================================
+// HTF BIAS: Daily + Weekly
+// Matches bot's PriceContext.get_htf_bias()
+// ============================================
+daily_bias  = request.security(syminfo.tickerid, "D", f_mtf_bias(swing_lookback))
+weekly_bias = request.security(syminfo.tickerid, "W", f_mtf_bias(swing_lookback))
+
+// If both align use that, else prefer weekly, else daily
+htf_bias = daily_bias == weekly_bias ? daily_bias : weekly_bias != 0 ? weekly_bias : daily_bias
+
+// ============================================
+// 4H STRUCTURE & WAVE
+// Bot checks 4H for BOS/CHoCH and wave phase
+// ============================================
+[h4_bias, h4_break_state] = request.security(syminfo.tickerid, "240", f_mtf_structure(swing_lookback))
+[h4_correction, h4_eff]   = request.security(syminfo.tickerid, "240", f_mtf_wave())
+
+// 4H & Daily S/R levels for proximity check
+[h4_sr_high, h4_sr_low] = request.security(syminfo.tickerid, "240", f_mtf_sr(swing_lookback))
+[d_sr_high, d_sr_low]   = request.security(syminfo.tickerid, "D", f_mtf_sr(swing_lookback))
+
+// ============================================
+// CHART TF (1H) - SWING POINT DETECTION
+// ============================================
+is_swing_high = true
+is_swing_low = true
+
+for i = 1 to swing_lookback
+    if high[swing_lookback] < high[swing_lookback - i] or high[swing_lookback] < high[swing_lookback + i]
+        is_swing_high := false
+    if low[swing_lookback] > low[swing_lookback - i] or low[swing_lookback] > low[swing_lookback + i]
+        is_swing_low := false
+
+var float last_sh = na
+var float prev_sh = na
+var float last_sl = na
+var float prev_sl = na
+var int last_sh_bar = na
+var int last_sl_bar = na
+
+if is_swing_high
+    prev_sh := last_sh
+    last_sh := high[swing_lookback]
+    last_sh_bar := bar_index - swing_lookback
+
+if is_swing_low
+    prev_sl := last_sl
+    last_sl := low[swing_lookback]
+    last_sl_bar := bar_index - swing_lookback
+
+plotshape(show_swings and is_swing_high ? high[swing_lookback] : na, style=shape.circle, location=location.abovebar, color=col_bear, size=size.auto, offset=-swing_lookback)
+plotshape(show_swings and is_swing_low ? low[swing_lookback] : na, style=shape.circle, location=location.belowbar, color=col_bull, size=size.auto, offset=-swing_lookback)
+
+// ============================================
+// CHART TF - MARKET STRUCTURE (BOS / CHoCH)
+// ============================================
+var int chart_bias = 0
+
+higher_high = not na(last_sh) and not na(prev_sh) and last_sh > prev_sh
+higher_low  = not na(last_sl) and not na(prev_sl) and last_sl > prev_sl
+lower_high  = not na(last_sh) and not na(prev_sh) and last_sh < prev_sh
+lower_low   = not na(last_sl) and not na(prev_sl) and last_sl < prev_sl
+
+if higher_high and higher_low
+    chart_bias := 1
+else if lower_high and lower_low
+    chart_bias := -1
+
+var int chart_last_break = 0  // 1=BOS, -1=CHoCH
+
+bos_bull  = chart_bias == 1 and close > last_sh and not na(last_sh)
+bos_bear  = chart_bias == -1 and close < last_sl and not na(last_sl)
+choch_bull = chart_bias == -1 and close > last_sh and not na(last_sh)
+choch_bear = chart_bias == 1 and close < last_sl and not na(last_sl)
+
+var float last_bos_price = na
+new_bos_bull   = bos_bull and (na(last_bos_price) or last_sh != last_bos_price)
+new_bos_bear   = bos_bear and (na(last_bos_price) or last_sl != last_bos_price)
+new_choch_bull = choch_bull and (na(last_bos_price) or last_sh != last_bos_price)
+new_choch_bear = choch_bear and (na(last_bos_price) or last_sl != last_bos_price)
+
+if new_bos_bull or new_bos_bear
+    chart_last_break := 1
+if new_choch_bull or new_choch_bear
+    chart_last_break := -1
+
+if new_bos_bull
+    last_bos_price := last_sh
+if new_bos_bear
+    last_bos_price := last_sl
+if new_choch_bull
+    last_bos_price := last_sh
+    chart_bias := 1
+if new_choch_bear
+    last_bos_price := last_sl
+    chart_bias := -1
+
+// BOS / CHoCH bar coloring (chart TF visuals)
+bos_choch_col = show_bos ? ((new_choch_bull or new_choch_bear) ? col_choch : (new_bos_bull or new_bos_bear) ? col_bos : na) : na
+
+// ============================================
+// BIAS BACKGROUND (HTF bias from Daily+Weekly)
+// ============================================
+bg_col = show_htf ? (htf_bias == 1 ? color.new(#34d399, 95) : htf_bias == -1 ? color.new(#f87171, 95) : color.new(#94a3b8, 97)) : na
+bgcolor(bg_col)
+
+// ============================================
+// CHART TF - WAVE ANALYSIS
+// ============================================
+wave_len = 20
+net_move = math.abs(close - close[wave_len])
+total_move = math.sum(math.abs(close - close[1]), wave_len)
+efficiency = total_move > 0 ? net_move / total_move : 0
+
+avg_body = ta.sma(math.abs(close - open), wave_len)
+avg_range = ta.sma(high - low, wave_len)
+body_ratio = avg_range > 0 ? avg_body / avg_range : 0
+
+is_impulse = efficiency > 0.3 and body_ratio > 0.4
+chart_correction = not is_impulse
+
+var string wave_phase = "?"
+if is_impulse
+    wave_phase := "IMP"
+else
+    wave_phase := "CORR"
+
+// ============================================
+// CHART TF - LIQUIDITY SWEEP DETECTION
+// ============================================
+sweep_above = not na(last_sh) and high > last_sh and close < last_sh and high[1] <= last_sh
+sweep_below = not na(last_sl) and low < last_sl and close > last_sl and low[1] >= last_sl
+
+// Bar coloring: sweep (purple) overrides CHoCH (amber) overrides BOS (blue)
+col_sweep = color.new(#a855f7, 0)
+barcolor((sweep_above or sweep_below) ? col_sweep : bos_choch_col)
+
+// ============================================
+// CHART TF - S/R ZONES
+// ============================================
+if show_sr and is_swing_high
+    line.new(bar_index - swing_lookback, high[swing_lookback], bar_index + 50, high[swing_lookback], color=color.new(#f87171, 0), style=line.style_dotted, width=1)
+
+if show_sr and is_swing_low
+    line.new(bar_index - swing_lookback, low[swing_lookback], bar_index + 50, low[swing_lookback], color=color.new(#34d399, 0), style=line.style_dotted, width=1)
+
+// ============================================
+// RSI DIVERGENCE (Wave Ending)
+// ============================================
+rsi_val = ta.rsi(close, 14)
+rsi_ob = rsi_val > 75
+rsi_os = rsi_val < 25
+
+bear_div = is_swing_high and not na(prev_sh) and high[swing_lookback] > prev_sh and rsi_val[swing_lookback] < ta.highest(rsi_val, 40)
+bull_div = is_swing_low and not na(prev_sl) and low[swing_lookback] < prev_sl and rsi_val[swing_lookback] > ta.lowest(rsi_val, 40)
+
+// ============================================
+// MULTI-TF CONFLUENCE SCORING
+// Matches bot's analysis/confluence.py
+// ============================================
+atr_val = ta.atr(atr_period)
+
+// --- LONG SCORING ---
+
+// 1. HTF Bias (Daily + Weekly) — weight 0.334
+htf_long = htf_bias == 1 ? 1.0 : htf_bias == 0 ? 0.3 : 0.0
+
+// 2. BOS: best of 4H and chart TF — weight 0.102
+//    BOS with aligned bias = 1.0, CHoCH = 0.6
+bos_long_4h = h4_break_state == 1 and h4_bias == 1 ? 1.0 : h4_break_state == -1 ? 0.6 : 0.0
+bos_long_1h = chart_last_break == 1 and chart_bias == 1 ? 1.0 : chart_last_break == -1 ? 0.6 : 0.0
+bos_long = math.max(bos_long_4h, bos_long_1h)
+
+// 3. Wave: correction in bullish trend on 4H or chart — weight 0.154
+wave_long_4h = h4_correction and h4_bias == 1 ? 0.8 : 0.0
+wave_long_1h = chart_correction and chart_bias == 1 ? 0.8 : 0.0
+wave_long = math.max(wave_long_4h, wave_long_1h)
+
+// 4. Liquidity sweep (chart TF) — weight 0.193
+liq_long = sweep_below ? 1.0 : 0.0
+
+// 5. S/R: near support on 1H, 4H, or Daily — weight 0.160
+sr_near_1h = not na(last_sl) and math.abs(close - last_sl) / close < 0.002
+sr_near_4h = not na(h4_sr_low) and math.abs(close - h4_sr_low) / close < 0.002
+sr_near_d  = not na(d_sr_low) and math.abs(close - d_sr_low) / close < 0.002
+sr_long = (sr_near_1h or sr_near_4h or sr_near_d) ? 0.8 : 0.0
+
+// 6. Wave ending / exhaustion — weight 0.057
+end_long = bull_div or rsi_os ? 0.8 : 0.0
+
+long_score = htf_long * w_htf_bias + bos_long * w_bos + wave_long * w_wave + liq_long * w_liquidity + sr_long * w_sr + end_long * w_wave_end
+
+// --- SHORT SCORING ---
+
+htf_short = htf_bias == -1 ? 1.0 : htf_bias == 0 ? 0.3 : 0.0
+
+bos_short_4h = h4_break_state == 1 and h4_bias == -1 ? 1.0 : h4_break_state == -1 ? 0.6 : 0.0
+bos_short_1h = chart_last_break == 1 and chart_bias == -1 ? 1.0 : chart_last_break == -1 ? 0.6 : 0.0
+bos_short = math.max(bos_short_4h, bos_short_1h)
+
+wave_short_4h = h4_correction and h4_bias == -1 ? 0.8 : 0.0
+wave_short_1h = chart_correction and chart_bias == -1 ? 0.8 : 0.0
+wave_short = math.max(wave_short_4h, wave_short_1h)
+
+liq_short = sweep_above ? 1.0 : 0.0
+
+sr_near_1h_r = not na(last_sh) and math.abs(close - last_sh) / close < 0.002
+sr_near_4h_r = not na(h4_sr_high) and math.abs(close - h4_sr_high) / close < 0.002
+sr_near_d_r  = not na(d_sr_high) and math.abs(close - d_sr_high) / close < 0.002
+sr_short = (sr_near_1h_r or sr_near_4h_r or sr_near_d_r) ? 0.8 : 0.0
+
+end_short = bear_div or rsi_ob ? 0.8 : 0.0
+
+short_score = htf_short * w_htf_bias + bos_short * w_bos + wave_short * w_wave + liq_short * w_liquidity + sr_short * w_sr + end_short * w_wave_end
+
+// Generate signals
+long_signal  = long_score >= confluence_thr and long_score > short_score
+short_signal = short_score >= confluence_thr and short_score > long_score
+
+// Cooldown: don't signal on consecutive bars
+var int last_signal_bar = 0
+can_signal = bar_index - last_signal_bar > 5
+
+// ============================================
+// TRADE TRACKING & ENTRY/EXIT
+// ============================================
+var bool in_trade = false
+var int trade_dir = 0
+var float trade_entry = na
+var float trade_sl = na
+var float trade_tp = na
+var int trade_entry_bar = na
+
+trade_hit_tp = false
+trade_hit_sl = false
+if in_trade and trade_dir == 1
+    if low <= trade_sl
+        trade_hit_sl := true
+        in_trade := false
+    else if high >= trade_tp
+        trade_hit_tp := true
+        in_trade := false
+if in_trade and trade_dir == -1
+    if high >= trade_sl
+        trade_hit_sl := true
+        in_trade := false
+    else if low <= trade_tp
+        trade_hit_tp := true
+        in_trade := false
+
+// Track outcome, entry label, and position boxes
+var bool last_trade_won = false
+var label entry_label = na
+var box tp_box = na
+var box sl_box = na
+var line entry_line = na
+
+if trade_hit_tp
+    last_trade_won := true
+    if not na(entry_label)
+        label.set_textcolor(entry_label, #34d399)
+    if not na(tp_box)
+        box.set_right(tp_box, bar_index)
+    if not na(sl_box)
+        box.set_right(sl_box, bar_index)
+    if not na(entry_line)
+        line.set_x2(entry_line, bar_index)
+if trade_hit_sl
+    last_trade_won := false
+    if not na(entry_label)
+        label.set_textcolor(entry_label, #f87171)
+    if not na(tp_box)
+        box.set_right(tp_box, bar_index)
+    if not na(sl_box)
+        box.set_right(sl_box, bar_index)
+    if not na(entry_line)
+        line.set_x2(entry_line, bar_index)
+
+
+// Safety: force-close if SL/TP are na (stuck trade from early bars)
+if in_trade and (na(trade_sl) or na(trade_tp))
+    in_trade := false
+
+// Entry signals: only on 1H chart (matches bot's entry timeframe), require valid ATR
+is_entry_tf = timeframe.period == "60"
+long_entry  = show_signals and is_entry_tf and long_signal and can_signal and not in_trade and not na(atr_val)
+short_entry = show_signals and is_entry_tf and short_signal and can_signal and not in_trade and not na(atr_val)
+
+if long_entry
+    trade_entry := close
+    trade_sl := close - atr_val * sl_atr_mult
+    trade_tp := close + (close - trade_sl) * tp_rr
+    trade_dir := 1
+    trade_entry_bar := bar_index
+    in_trade := true
+    last_signal_bar := bar_index
+
+if short_entry
+    trade_entry := close
+    trade_sl := close + atr_val * sl_atr_mult
+    trade_tp := close - (trade_sl - close) * tp_rr
+    trade_dir := -1
+    trade_entry_bar := bar_index
+    in_trade := true
+    last_signal_bar := bar_index
+
+// Entry markers + position boxes
+if long_entry
+    score_pct = str.tostring(long_score * 100, "#.#")
+    sl_pips = str.tostring((trade_entry - trade_sl) / syminfo.mintick, "#.#")
+    tp_pips = str.tostring((trade_tp - trade_entry) / syminfo.mintick, "#.#")
+    htf_txt = htf_bias == 1 ? "BULL" : htf_bias == -1 ? "BEAR" : "RANGE"
+    h4_txt = h4_bias == 1 ? "BULL" : h4_bias == -1 ? "BEAR" : "RANGE"
+    tip = "LONG" + "\nEntry: " + str.tostring(trade_entry, "#.#####") + "\nSL: " + str.tostring(trade_sl, "#.#####") + " (" + sl_pips + " pips)" + "\nTP: " + str.tostring(trade_tp, "#.#####") + " (" + tp_pips + " pips)" + "\nR:R 1:" + str.tostring(tp_rr, "#.#") + "\nScore: " + score_pct + "%" + "\nHTF(D+W): " + htf_txt + " | 4H: " + h4_txt + " | Wave: " + wave_phase
+    entry_label := label.new(bar_index, low, "▲", style=label.style_none, textcolor=#fbbf24, size=size.normal, tooltip=tip)
+    tp_box := box.new(bar_index, trade_tp, bar_index + 50, trade_entry, border_color=color.new(#34d399, 60), bgcolor=color.new(#34d399, 90), border_width=1)
+    sl_box := box.new(bar_index, trade_entry, bar_index + 50, trade_sl, border_color=color.new(#f87171, 60), bgcolor=color.new(#f87171, 90), border_width=1)
+    entry_line := line.new(bar_index, trade_entry, bar_index + 50, trade_entry, color=color.new(#94a3b8, 40), style=line.style_dashed, width=1)
+
+if short_entry
+    score_pct = str.tostring(short_score * 100, "#.#")
+    sl_pips = str.tostring((trade_sl - trade_entry) / syminfo.mintick, "#.#")
+    tp_pips = str.tostring((trade_entry - trade_tp) / syminfo.mintick, "#.#")
+    htf_txt = htf_bias == 1 ? "BULL" : htf_bias == -1 ? "BEAR" : "RANGE"
+    h4_txt = h4_bias == 1 ? "BULL" : h4_bias == -1 ? "BEAR" : "RANGE"
+    tip = "SHORT" + "\nEntry: " + str.tostring(trade_entry, "#.#####") + "\nSL: " + str.tostring(trade_sl, "#.#####") + " (" + sl_pips + " pips)" + "\nTP: " + str.tostring(trade_tp, "#.#####") + " (" + tp_pips + " pips)" + "\nR:R 1:" + str.tostring(tp_rr, "#.#") + "\nScore: " + score_pct + "%" + "\nHTF(D+W): " + htf_txt + " | 4H: " + h4_txt + " | Wave: " + wave_phase
+    entry_label := label.new(bar_index, high, "▼", style=label.style_none, textcolor=#fbbf24, size=size.normal, tooltip=tip)
+    tp_box := box.new(bar_index, trade_entry, bar_index + 50, trade_tp, border_color=color.new(#34d399, 60), bgcolor=color.new(#34d399, 90), border_width=1)
+    sl_box := box.new(bar_index, trade_sl, bar_index + 50, trade_entry, border_color=color.new(#f87171, 60), bgcolor=color.new(#f87171, 90), border_width=1)
+    entry_line := line.new(bar_index, trade_entry, bar_index + 50, trade_entry, color=color.new(#94a3b8, 40), style=line.style_dashed, width=1)
+
+// ============================================
+// INFO TABLE
+// ============================================
+var table info = table.new(position.top_right, 2, 9, bgcolor=color.new(#111827, 10), border_width=1, border_color=color.new(#1e293b, 0))
+
+if barstate.islast
+    htf_txt = htf_bias == 1 ? "BULLISH" : htf_bias == -1 ? "BEARISH" : "RANGING"
+    htf_col = htf_bias == 1 ? col_bull : htf_bias == -1 ? col_bear : color.gray
+    table.cell(info, 0, 0, "HTF Bias", text_color=color.gray, text_size=size.small)
+    table.cell(info, 1, 0, htf_txt, text_color=htf_col, text_size=size.small)
+
+    d_txt = daily_bias == 1 ? "BULL" : daily_bias == -1 ? "BEAR" : "RANGE"
+    w_txt = weekly_bias == 1 ? "BULL" : weekly_bias == -1 ? "BEAR" : "RANGE"
+    table.cell(info, 0, 1, "D / W", text_color=color.gray, text_size=size.small)
+    table.cell(info, 1, 1, d_txt + " / " + w_txt, text_color=color.white, text_size=size.small)
+
+    h4_bias_txt = h4_bias == 1 ? "BULL" : h4_bias == -1 ? "BEAR" : "RANGE"
+    h4_brk_txt = h4_break_state == 1 ? " BOS" : h4_break_state == -1 ? " CHoCH" : ""
+    table.cell(info, 0, 2, "4H", text_color=color.gray, text_size=size.small)
+    table.cell(info, 1, 2, h4_bias_txt + h4_brk_txt, text_color=h4_bias == 1 ? col_bull : h4_bias == -1 ? col_bear : color.gray, text_size=size.small)
+
+    ct_txt = chart_bias == 1 ? "BULL" : chart_bias == -1 ? "BEAR" : "RANGE"
+    ct_brk_txt = chart_last_break == 1 ? " BOS" : chart_last_break == -1 ? " CHoCH" : ""
+    table.cell(info, 0, 3, "Chart", text_color=color.gray, text_size=size.small)
+    table.cell(info, 1, 3, ct_txt + ct_brk_txt, text_color=chart_bias == 1 ? col_bull : chart_bias == -1 ? col_bear : color.gray, text_size=size.small)
+
+    table.cell(info, 0, 4, "Wave", text_color=color.gray, text_size=size.small)
+    table.cell(info, 1, 4, wave_phase, text_color=is_impulse ? col_bos : color.gray, text_size=size.small)
+
+    table.cell(info, 0, 5, "ATR", text_color=color.gray, text_size=size.small)
+    table.cell(info, 1, 5, str.tostring(atr_val, "#.#####"), text_color=color.white, text_size=size.small)
+
+    rsi_col = rsi_ob ? col_bear : rsi_os ? col_bull : color.white
+    table.cell(info, 0, 6, "RSI", text_color=color.gray, text_size=size.small)
+    table.cell(info, 1, 6, str.tostring(rsi_val, "#.#"), text_color=rsi_col, text_size=size.small)
+
+    table.cell(info, 0, 7, "Long Score", text_color=color.gray, text_size=size.small)
+    table.cell(info, 1, 7, str.tostring(long_score * 100, "#") + "%", text_color=long_score >= confluence_thr ? col_bull : color.gray, text_size=size.small)
+
+    table.cell(info, 0, 8, "Short Score", text_color=color.gray, text_size=size.small)
+    table.cell(info, 1, 8, str.tostring(short_score * 100, "#") + "%", text_color=short_score >= confluence_thr ? col_bear : color.gray, text_size=size.small)
+
+// ============================================
+// ALERTS
+// ============================================
+alertcondition(long_signal and can_signal, title="Long Signal", message="EURUSD LONG signal - Confluence: {{plot_0}}")
+alertcondition(short_signal and can_signal, title="Short Signal", message="EURUSD SHORT signal - Confluence: {{plot_0}}")
+alertcondition(new_bos_bull or new_bos_bear, title="Break of Structure", message="EURUSD BOS detected")
+alertcondition(new_choch_bull or new_choch_bear, title="Change of Character", message="EURUSD CHoCH detected")
+alertcondition(sweep_above or sweep_below, title="Liquidity Sweep", message="EURUSD Liquidity sweep detected")

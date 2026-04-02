@@ -94,8 +94,57 @@ def fetch_candles(
     }
 
     if from_time and to_time:
-        params["from"] = from_time.strftime("%Y-%m-%dT%H:%M:%SZ")
-        params["to"] = to_time.strftime("%Y-%m-%dT%H:%M:%SZ")
+        # Auto-paginate: OANDA allows max 5000 candles per request
+        # Pre-chunk by time to stay under the limit
+        CHUNK_HOURS = {
+            "H1": 4000, "H4": 16000, "M15": 1000,
+            "D": 100000, "W": 500000, "M1": 240,
+        }
+        hours_per_chunk = CHUNK_HOURS.get(granularity, 4000)
+
+        all_candles = []
+        chunk_start = from_time
+        while chunk_start < to_time:
+            chunk_end = min(chunk_start + timedelta(hours=hours_per_chunk), to_time)
+            chunk_params = {
+                "granularity": granularity,
+                "price": "M",
+                "from": chunk_start.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                "to": chunk_end.strftime("%Y-%m-%dT%H:%M:%SZ"),
+            }
+            r = httpx.get(
+                f"{BASE_URL}/v3/instruments/{INSTRUMENT}/candles",
+                headers=HEADERS,
+                params=chunk_params,
+                timeout=30,
+            )
+            r.raise_for_status()
+            data = r.json()
+
+            chunk_candles = data.get("candles", [])
+            if not chunk_candles:
+                chunk_start = chunk_end
+                continue
+
+            for c in chunk_candles:
+                if not c.get("complete", True) and not c.get("mid"):
+                    continue
+                mid = c["mid"]
+                ts = datetime.fromisoformat(c["time"].replace("Z", "+00:00")).replace(tzinfo=None)
+                all_candles.append(Candle(
+                    timestamp=ts,
+                    timeframe=timeframe,
+                    open=float(mid["o"]),
+                    high=float(mid["h"]),
+                    low=float(mid["l"]),
+                    close=float(mid["c"]),
+                    volume=float(c.get("volume", 0)),
+                ))
+
+            chunk_start = chunk_end
+
+        logger.info(f"OANDA: fetched {len(all_candles)} {timeframe} candles (paginated)")
+        return all_candles
     else:
         params["count"] = min(count, 5000)
 

@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>EURUSD Trading Bot</title>
     <script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
-    <link rel="stylesheet" href="/static/styles.css">
+    <link rel="stylesheet" href="/static/styles.css?v=6">
 </head>
 <body>
     <header>
@@ -25,6 +25,7 @@
         <button class="tab" data-tab="trades">Trades</button>
         <button class="tab" data-tab="chart">Chart</button>
         <button class="tab" data-tab="backtest">Backtests</button>
+        <button class="tab" data-tab="compare">Comparisons</button>
         <button class="tab" data-tab="learning">Learning</button>
     </nav>
 
@@ -54,40 +55,54 @@
         <!-- Trades -->
         <section id="trades" class="tab-content">
             <div class="card full-width">
-                <h3>Trade History</h3>
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px">
+                    <h3 style="margin:0">Trade History</h3>
+                    <div id="trade-summary" style="font-size:13px;color:#94a3b8"></div>
+                    <div style="display:flex;gap:8px">
+                        <select id="trade-bt-filter" style="background:#1e293b;color:#e2e8f0;border:1px solid #334155;padding:4px 8px;border-radius:4px;font-size:12px;max-width:260px">
+                            <option value="live">Live Trades</option>
+                        </select>
+                    </div>
+                </div>
+                <div style="overflow-x:auto">
                 <table id="trades-table">
                     <thead>
                         <tr>
                             <th>#</th>
+                            <th>Result</th>
                             <th>Direction</th>
                             <th>Type</th>
                             <th>Entry</th>
                             <th>Exit</th>
                             <th>SL</th>
                             <th>TP</th>
+                            <th>RR Plan</th>
+                            <th>RR Actual</th>
                             <th>P&L Pips</th>
                             <th>P&L £</th>
+                            <th>Risk £</th>
                             <th>Score</th>
-                            <th>Status</th>
+                            <th>Duration</th>
                             <th>Opened</th>
+                            <th>Closed</th>
+                            <th>Source</th>
                         </tr>
                     </thead>
                     <tbody id="trades-body"></tbody>
                 </table>
+                </div>
             </div>
         </section>
 
         <!-- Chart -->
         <section id="chart" class="tab-content">
             <div class="card full-width">
-                <div class="chart-controls">
-                    <select id="tf-select">
-                        <option value="15m">15 Min</option>
-                        <option value="1h">1 Hour</option>
-                        <option value="4h" selected>4 Hour</option>
-                        <option value="1d">Daily</option>
-                        <option value="1wk">Weekly</option>
-                    </select>
+                <div class="tf-buttons">
+                    <button class="tf-btn" data-tf="15m">15M</button>
+                    <button class="tf-btn" data-tf="1h">1H</button>
+                    <button class="tf-btn active" data-tf="4h">4H</button>
+                    <button class="tf-btn" data-tf="1d">1D</button>
+                    <button class="tf-btn" data-tf="1wk">1W</button>
                 </div>
                 <div id="price-chart" style="height: 500px;"></div>
             </div>
@@ -115,6 +130,11 @@
             </div>
         </section>
 
+        <!-- Comparisons -->
+        <section id="compare" class="tab-content">
+            <div id="compare-groups"></div>
+        </section>
+
         <!-- Learning -->
         <section id="learning" class="tab-content">
             <div class="grid">
@@ -130,6 +150,6 @@
         </section>
     </main>
 
-    <script src="/static/app.js"></script>
+    <script src="/static/app.js?v=6"></script>
 </body>
 </html>

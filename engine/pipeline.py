@@ -11,7 +11,7 @@ from agents.learner import LearnerAgent
 from data.ingestion import fetch_candles, load_candles, save_candles, get_live_price
 from data.models import Candle
 from engine.event_bus import bus
-from config.settings import PAIR, TIMEFRAMES, TIMEFRAME_MINUTES
+from config.settings import PAIR, TIMEFRAMES, TIMEFRAME_MINUTES, NO_OVERLAP_ENTRIES, BLOCK_HOURS_UTC
 
 logger = logging.getLogger(__name__)
 
@@ -102,6 +102,10 @@ class TradingPipeline:
         signals = signal_result.get("signals", [])
         summary["signals"] = len(signals)
 
+        # 4b. Apply trading rules
+        signals = self._filter_signals(signals, current_price)
+        summary["signals"] = len(signals)
+
         # 5. Risk check and size
         if signals:
             risk_result = self.risk_mgr.process({"signals": signals})
@@ -138,6 +142,36 @@ class TradingPipeline:
         finally:
             self._running = False
             self.teardown()
+
+    def _filter_signals(self, signals: list, current_price: float) -> list:
+        """Apply evidence-based trading rules before risk processing."""
+        if not signals:
+            return signals
+
+        now = datetime.utcnow()
+
+        # Block signals during low-quality hours
+        if BLOCK_HOURS_UTC and now.hour in BLOCK_HOURS_UTC:
+            logger.info(f"Skipping {len(signals)} signal(s) — blocked hour {now.hour:02d}:00 UTC")
+            return []
+
+        filtered = []
+        for signal in signals:
+            # No-overlap: skip if a position in the same direction is already open
+            if NO_OVERLAP_ENTRIES:
+                same_dir_open = any(
+                    p.signal.direction == signal.direction
+                    for p in self.risk_mgr.open_positions
+                )
+                if same_dir_open:
+                    logger.debug(f"Skipping {signal.direction.value} signal — position already open in same direction")
+                    continue
+            filtered.append(signal)
+
+        skipped = len(signals) - len(filtered)
+        if skipped:
+            logger.info(f"Trading rules filtered {skipped}/{len(signals)} signal(s)")
+        return filtered
 
     def _get_candles(self) -> dict[str, list[Candle]]:
         """Get candles for all timeframes, fetching new data as needed."""

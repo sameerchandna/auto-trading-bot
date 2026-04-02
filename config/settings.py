@@ -40,6 +40,10 @@ MAX_PORTFOLIO_RISK = 0.06        # 6% total exposure
 DAILY_LOSS_LIMIT = 0.04          # 4% - stop trading for the day
 WEEKLY_LOSS_LIMIT = 0.08         # 8% - reduce size next week
 
+# Trading rules (evidence-based, from backtest A/B analysis)
+NO_OVERLAP_ENTRIES = True         # Block same-direction entry if position already open
+BLOCK_HOURS_UTC = [17, 18, 19, 20]  # Skip signals during these UTC hours (low-quality window)
+
 # Learnable parameters (defaults - adjusted by optimizer)
 CONFLUENCE_THRESHOLD = 0.60       # Minimum score to generate signal
 SWING_LOOKBACK = 5                # Bars for swing point detection

@@ -30,6 +30,12 @@ class RiskManagerAgent(BaseAgent):
         self.last_daily_reset = datetime.utcnow().date()
         self.last_weekly_reset = datetime.utcnow().date()
         self.reduced_size = False  # True after weekly loss limit hit
+        self._simulated_time: datetime | None = None  # Set by backtest engine
+
+    @property
+    def now(self) -> datetime:
+        """Current time — simulated during backtest, real otherwise."""
+        return self._simulated_time or datetime.utcnow()
 
     def process(self, data: dict) -> dict:
         """Validate signals and create sized positions.
@@ -110,7 +116,7 @@ class RiskManagerAgent(BaseAgent):
             entry_price=signal.entry_price,
             size=round(size_units, 0),
             risk_amount=round(risk_per_trade, 2),
-            opened_at=datetime.utcnow(),
+            opened_at=self.now,
             tags=[signal.signal_type.value],
         )
 
@@ -128,7 +134,7 @@ class RiskManagerAgent(BaseAgent):
         """Close a position and update P&L."""
         position.status = TradeStatus.CLOSED
         position.exit_price = exit_price
-        position.closed_at = datetime.utcnow()
+        position.closed_at = self.now
 
         if position.signal.direction == Direction.LONG:
             pnl_pips = (exit_price - position.entry_price) / PIP_VALUE

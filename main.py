@@ -154,25 +154,43 @@ def backtest(
     start: str = typer.Option("2024-01-01", help="Start date YYYY-MM-DD"),
     end: str = typer.Option(None, help="End date YYYY-MM-DD (default: today)"),
     capital: float = typer.Option(10_000, help="Starting capital"),
+    no_overlap: bool = typer.Option(False, "--no-overlap", help="Block same-direction entries when a position is already open"),
+    min_score: float = typer.Option(0.60, "--min-score", help="Minimum confluence score to enter a trade"),
+    block_hours: str = typer.Option("", "--block-hours", help="Comma-separated UTC hours to skip (e.g. '17,18,19')"),
+    block_days: str = typer.Option("", "--block-days", help="Comma-separated days to skip: mon,tue,wed,thu,fri"),
+    cooldown: int = typer.Option(0, "--cooldown", help="Skip N signals after this many consecutive losses"),
+    label: str = typer.Option("", "--label", help="Optional label for this run"),
 ):
     """Run a backtest on historical data."""
     setup_logging()
     from backtest.engine import BacktestEngine
-    from storage.database import BacktestRecord, get_session
+    from backtest.config import BacktestConfig
+    from storage.database import BacktestRecord, PositionRecord, get_session
     import json
 
     start_date = datetime.strptime(start, "%Y-%m-%d")
     end_date = datetime.strptime(end, "%Y-%m-%d") if end else datetime.utcnow()
 
+    day_map = {"mon": 0, "tue": 1, "wed": 2, "thu": 3, "fri": 4, "sat": 5, "sun": 6}
+    cfg = BacktestConfig(
+        no_overlap=no_overlap,
+        min_score=min_score,
+        block_hours=[int(h) for h in block_hours.split(",") if h.strip()] if block_hours else [],
+        block_days=[day_map[d.strip().lower()] for d in block_days.split(",") if d.strip()] if block_days else [],
+        cooldown_after_losses=cooldown,
+    )
+    cfg_label = label or cfg.label()
+
     console.print(Panel(
         f"Backtesting {PAIR_NAME}\n"
         f"Period: {start} to {end_date.strftime('%Y-%m-%d')}\n"
-        f"Capital: \u00a3{capital:,}",
+        f"Capital: \u00a3{capital:,}\n"
+        f"Config:  {cfg_label}",
         title="Backtest",
         style="blue",
     ))
 
-    engine = BacktestEngine(start_date, end_date, capital)
+    engine = BacktestEngine(start_date, end_date, capital, config=cfg)
     results = engine.run()
 
     if "error" in results:
@@ -180,12 +198,14 @@ def backtest(
         return
 
     metrics = results["metrics"]
+    _print_metrics_table(metrics, title=f"Backtest Results — {cfg_label}")
+    _save_backtest(engine, metrics, start_date, end_date, cfg, cfg_label)
 
-    # Display results
-    table = Table(title="Backtest Results")
+
+def _print_metrics_table(metrics: dict, title: str = "Backtest Results"):
+    table = Table(title=title)
     table.add_column("Metric", style="cyan")
     table.add_column("Value", style="bold")
-
     for key, value in metrics.items():
         if isinstance(value, float):
             if "rate" in key or "pct" in key:
@@ -194,15 +214,19 @@ def backtest(
                 table.add_row(key.replace("_", " ").title(), f"{value:.2f}")
         else:
             table.add_row(key.replace("_", " ").title(), str(value))
-
     console.print(table)
 
-    # Save to database
+
+def _save_backtest(engine, metrics: dict, start_date, end_date, cfg, cfg_label: str):
+    from storage.database import BacktestRecord, PositionRecord, TradeJournalRecord, get_session
+    import json
+
     session = get_session()
     try:
         rec = BacktestRecord(
             start_date=start_date,
             end_date=end_date,
+            params_json=json.dumps({"config": cfg_label}),
             results_json=json.dumps(metrics),
             total_trades=metrics["total_trades"],
             win_rate=metrics["win_rate"],
@@ -211,10 +235,159 @@ def backtest(
             sharpe_ratio=metrics["sharpe_ratio"],
         )
         session.add(rec)
+        session.flush()
+
+        trade_tags = cfg.tags() + [f"bt_{rec.id}"]
+        closed_trades = engine.risk_mgr.closed_positions
+        trade_count = 0
+        for pos in closed_trades:
+            duration_mins = 0
+            if pos.opened_at and pos.closed_at:
+                duration_mins = int((pos.closed_at - pos.opened_at).total_seconds() / 60)
+
+            pos_rec = PositionRecord(
+                signal_id=None,
+                status="closed",
+                direction=pos.signal.direction.value,
+                entry_price=pos.entry_price,
+                exit_price=pos.exit_price,
+                size=pos.size,
+                risk_amount=pos.risk_amount,
+                opened_at=pos.opened_at,
+                closed_at=pos.closed_at,
+                pnl=pos.pnl,
+                pnl_pips=pos.pnl_pips,
+                tags=json.dumps(trade_tags),
+                signal_type=pos.signal.signal_type.value if hasattr(pos.signal.signal_type, 'value') else str(pos.signal.signal_type),
+                stop_loss=pos.signal.stop_loss,
+                take_profit=pos.signal.take_profit,
+                confluence_score=pos.signal.confluence_score,
+            )
+            session.add(pos_rec)
+            session.flush()
+
+            journal = TradeJournalRecord(
+                position_id=pos_rec.id,
+                duration_minutes=duration_mins,
+            )
+            session.add(journal)
+            trade_count += 1
+
         session.commit()
-        console.print("[green]Results saved to database[/]")
+        console.print(f"[green]Saved to database: BT#{rec.id} ({trade_count} trades)[/]")
     finally:
         session.close()
+
+
+@app.command()
+def compare(
+    start: str = typer.Option("2023-01-01", help="Start date YYYY-MM-DD"),
+    end: str = typer.Option(None, help="End date YYYY-MM-DD (default: today)"),
+    capital: float = typer.Option(10_000, help="Starting capital"),
+    no_overlap: bool = typer.Option(False, "--no-overlap"),
+    min_score: float = typer.Option(0.60, "--min-score"),
+    block_hours: str = typer.Option("", "--block-hours"),
+    block_days: str = typer.Option("", "--block-days"),
+    cooldown: int = typer.Option(0, "--cooldown"),
+):
+    """Run baseline vs. a modified config and show side-by-side results."""
+    setup_logging()
+    from backtest.engine import BacktestEngine
+    from backtest.config import BacktestConfig, BASELINE
+    import json
+
+    start_date = datetime.strptime(start, "%Y-%m-%d")
+    end_date = datetime.strptime(end, "%Y-%m-%d") if end else datetime.utcnow()
+
+    day_map = {"mon": 0, "tue": 1, "wed": 2, "thu": 3, "fri": 4, "sat": 5, "sun": 6}
+    test_cfg = BacktestConfig(
+        no_overlap=no_overlap,
+        min_score=min_score,
+        block_hours=[int(h) for h in block_hours.split(",") if h.strip()] if block_hours else [],
+        block_days=[day_map[d.strip().lower()] for d in block_days.split(",") if d.strip()] if block_days else [],
+        cooldown_after_losses=cooldown,
+    )
+
+    if test_cfg.label() == "baseline":
+        console.print("[yellow]No rules specified — nothing to compare. Add at least one flag (e.g. --no-overlap)[/]")
+        return
+
+    console.print(Panel(
+        f"Comparing: [bold]baseline[/] vs [bold]{test_cfg.label()}[/]\n"
+        f"Period: {start} to {end_date.strftime('%Y-%m-%d')} | Capital: \u00a3{capital:,}",
+        title="A/B Comparison",
+        style="blue",
+    ))
+
+    # Run baseline
+    console.print("\n[dim]Running baseline...[/]")
+    base_engine = BacktestEngine(start_date, end_date, capital, config=BASELINE)
+    base_results = base_engine.run()
+
+    # Run test
+    console.print(f"[dim]Running {test_cfg.label()}...[/]")
+    test_engine = BacktestEngine(start_date, end_date, capital, config=test_cfg)
+    test_results = test_engine.run()
+
+    if "error" in base_results or "error" in test_results:
+        console.print("[red]Error running one or both backtests[/]")
+        return
+
+    bm = base_results["metrics"]
+    tm = test_results["metrics"]
+
+    # Side-by-side comparison table
+    COMPARE_KEYS = [
+        ("total_trades",       "Trades",       lambda v: str(v),               False),
+        ("wins",               "Wins",         lambda v: str(v),               True),
+        ("losses",             "Losses",       lambda v: str(v),               False),
+        ("win_rate",           "Win Rate",     lambda v: f"{v:.1%}",           True),
+        ("profit_factor",      "Profit Factor",lambda v: f"{v:.2f}",           True),
+        ("total_pnl",          "Total P&L",    lambda v: f"\u00a3{v:.2f}",    True),
+        ("expectancy_pips",    "Expectancy",   lambda v: f"{v:+.1f} pips",    True),
+        ("max_drawdown_pct",   "Max Drawdown", lambda v: f"{v:.1%}",           False),
+        ("sharpe_ratio",       "Sharpe",       lambda v: f"{v:.2f}",           True),
+        ("avg_win_pips",       "Avg Win",      lambda v: f"{v:.1f} pips",     True),
+        ("avg_loss_pips",      "Avg Loss",     lambda v: f"{v:.1f} pips",     False),
+        ("consecutive_losses", "Max Con. Losses", lambda v: str(v),           False),
+    ]
+
+    table = Table(title="Baseline vs " + test_cfg.label())
+    table.add_column("Metric", style="cyan")
+    table.add_column("Baseline", style="white")
+    table.add_column(test_cfg.label(), style="white")
+    table.add_column("Delta", style="bold")
+
+    for key, label, fmt, higher_is_better in COMPARE_KEYS:
+        bv = bm.get(key, 0)
+        tv = tm.get(key, 0)
+        b_str = fmt(bv)
+        t_str = fmt(tv)
+
+        if isinstance(bv, (int, float)) and isinstance(tv, (int, float)):
+            delta = tv - bv
+            if key in ("win_rate", "max_drawdown_pct"):
+                d_str = f"{delta:+.1%}"
+            elif key == "total_pnl":
+                d_str = f"\u00a3{delta:+.2f}"
+            elif isinstance(delta, float):
+                d_str = f"{delta:+.2f}"
+            else:
+                d_str = f"{delta:+d}"
+
+            improved = (delta > 0) == higher_is_better
+            delta_color = "green" if improved else "red"
+            delta_cell = f"[{delta_color}]{d_str}[/{delta_color}]"
+        else:
+            delta_cell = "--"
+
+        table.add_row(label, b_str, t_str, delta_cell)
+
+    console.print(table)
+
+    # Save both to DB
+    _save_backtest(base_engine, bm, start_date, end_date, BASELINE, "baseline")
+    _save_backtest(test_engine, tm, start_date, end_date, test_cfg, test_cfg.label())
 
 
 @app.command()

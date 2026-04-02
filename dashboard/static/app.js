@@ -19,9 +19,10 @@ document.querySelectorAll('.tab').forEach(tab => {
 function loadTabData(tab) {
     switch(tab) {
         case 'overview': loadOverview(); break;
-        case 'trades': loadTrades(); break;
-        case 'chart': loadChart(); break;
+        case 'trades': populateTradeFilter().then(loadTrades); break;
+        case 'chart': setTimeout(loadChart, 50); break;
         case 'backtest': loadBacktests(); break;
+        case 'compare': loadComparisons(); break;
         case 'learning': loadLearning(); break;
     }
 }
@@ -229,41 +230,141 @@ async function loadAccountSummary() {
 }
 
 // Trades tab
+function formatDuration(mins) {
+    if (mins == null) return '--';
+    if (mins < 60) return `${mins}m`;
+    if (mins < 1440) return `${Math.floor(mins/60)}h ${mins%60}m`;
+    const days = Math.floor(mins / 1440);
+    const hours = Math.floor((mins % 1440) / 60);
+    return `${days}d ${hours}h`;
+}
+
+async function populateTradeFilter() {
+    try {
+        const res = await fetch(`${API}/api/backtests`);
+        const runs = await res.json();
+        const sel = document.getElementById('trade-bt-filter');
+        if (!sel) return;
+
+        const currentVal = sel.value;
+        sel.innerHTML = '<option value="live">Live Trades</option>';
+        for (const r of runs) {
+            if (!r.total_trades) continue;
+            const start = new Date(r.start_date).toLocaleDateString('en-GB', {day:'2-digit',month:'short',year:'2-digit'});
+            const end = new Date(r.end_date).toLocaleDateString('en-GB', {day:'2-digit',month:'short',year:'2-digit'});
+            const label = `BT#${r.id} ${r.config} | ${start}-${end} | ${r.total_trades}T ${(r.win_rate*100).toFixed(0)}%WR`;
+            sel.innerHTML += `<option value="bt_${r.id}">${label}</option>`;
+        }
+        // Restore previous selection if still valid
+        if (currentVal && [...sel.options].some(o => o.value === currentVal)) {
+            sel.value = currentVal;
+        }
+    } catch(e) { console.error('populateTradeFilter failed:', e); }
+}
+
 async function loadTrades() {
     try {
-        const res = await fetch(`${API}/api/trades?limit=50`);
+        const sel = document.getElementById('trade-bt-filter');
+        const val = sel ? sel.value : 'live';
+
+        let url;
+        if (!val || val === 'live') {
+            url = `${API}/api/trades?source=live`;
+        } else {
+            const btId = val.replace('bt_', '');
+            url = `${API}/api/trades?bt_id=${btId}`;
+        }
+        const res = await fetch(url);
         const trades = await res.json();
+
+        // Summary stats
+        const closed = trades.filter(t => t.status === 'closed');
+        const wins = closed.filter(t => t.outcome === 'win');
+        const losses = closed.filter(t => t.outcome === 'loss');
+        const totalPnl = closed.reduce((s, t) => s + (t.pnl || 0), 0);
+        const winRate = closed.length > 0 ? (wins.length / closed.length * 100).toFixed(1) : '0.0';
+
+        // Average RR
+        const rrValues = closed.filter(t => t.actual_rr != null).map(t => t.actual_rr);
+        const avgRR = rrValues.length > 0 ? (rrValues.reduce((a, b) => a + b, 0) / rrValues.length) : 0;
+        const avgWinRR = wins.filter(t => t.actual_rr != null).length > 0
+            ? wins.filter(t => t.actual_rr != null).reduce((s, t) => s + t.actual_rr, 0) / wins.filter(t => t.actual_rr != null).length : 0;
+        const avgLossRR = losses.filter(t => t.actual_rr != null).length > 0
+            ? losses.filter(t => t.actual_rr != null).reduce((s, t) => s + t.actual_rr, 0) / losses.filter(t => t.actual_rr != null).length : 0;
+
+        const summaryEl = document.getElementById('trade-summary');
+        if (summaryEl) {
+            const pnlClass = totalPnl >= 0 ? 'positive' : 'negative';
+            summaryEl.innerHTML = `
+                <strong>${closed.length}</strong> trades |
+                <span class="positive">${wins.length}W</span> /
+                <span class="negative">${losses.length}L</span> |
+                WR: <strong>${winRate}%</strong> |
+                Avg RR: <strong>${avgRR >= 0 ? '+' : ''}${avgRR.toFixed(2)}R</strong>
+                (W: +${avgWinRR.toFixed(2)}R / L: ${avgLossRR.toFixed(2)}R) |
+                P&L: <span class="${pnlClass}"><strong>\u00a3${totalPnl.toFixed(2)}</strong></span>`;
+        }
 
         let html = '';
         for (const t of trades) {
             const dirClass = t.direction === 'long' ? 'badge-long' : 'badge-short';
-            const statusClass = t.status === 'open' ? 'badge-open' : 'badge-closed';
             const pnlClass = (t.pnl || 0) >= 0 ? 'positive' : 'negative';
+
+            // Result badge
+            let resultBadge = '--';
+            if (t.outcome === 'win') resultBadge = '<span class="badge badge-win">WIN</span>';
+            else if (t.outcome === 'loss') resultBadge = '<span class="badge badge-loss">LOSS</span>';
+            else if (t.outcome === 'breakeven') resultBadge = '<span class="badge badge-be">BE</span>';
+            else if (t.status === 'open') resultBadge = '<span class="badge badge-open">OPEN</span>';
+
+            // Source tag
+            const isBacktest = t.tags && t.tags.includes('backtest');
+            const sourceTag = isBacktest ? '<span class="badge badge-bt">BT</span>' : '<span class="badge badge-live">LIVE</span>';
 
             html += `<tr>
                 <td>${t.id}</td>
+                <td>${resultBadge}</td>
                 <td><span class="badge ${dirClass}">${t.direction}</span></td>
                 <td>${t.signal_type || '--'}</td>
                 <td>${t.entry_price.toFixed(5)}</td>
                 <td>${t.exit_price ? t.exit_price.toFixed(5) : '--'}</td>
                 <td>${t.stop_loss ? t.stop_loss.toFixed(5) : '--'}</td>
                 <td>${t.take_profit ? t.take_profit.toFixed(5) : '--'}</td>
-                <td class="${pnlClass}">${t.pnl_pips ? t.pnl_pips.toFixed(1) : '--'}</td>
-                <td class="${pnlClass}">${t.pnl ? '\u00a3' + t.pnl.toFixed(2) : '--'}</td>
+                <td>${t.planned_rr != null ? t.planned_rr.toFixed(1) + ':1' : '--'}</td>
+                <td class="${pnlClass}">${t.actual_rr != null ? (t.actual_rr >= 0 ? '+' : '') + t.actual_rr.toFixed(2) + 'R' : '--'}</td>
+                <td class="${pnlClass}">${t.pnl_pips != null ? t.pnl_pips.toFixed(1) : '--'}</td>
+                <td class="${pnlClass}">${t.pnl != null ? '\u00a3' + t.pnl.toFixed(2) : '--'}</td>
+                <td>${t.risk_amount ? '\u00a3' + t.risk_amount.toFixed(2) : '--'}</td>
                 <td>${t.confluence_score ? (t.confluence_score * 100).toFixed(0) + '%' : '--'}</td>
-                <td><span class="badge ${statusClass}">${t.status}</span></td>
+                <td>${formatDuration(t.duration_mins)}</td>
                 <td>${t.opened_at ? new Date(t.opened_at).toLocaleDateString() : '--'}</td>
+                <td>${t.closed_at ? new Date(t.closed_at).toLocaleDateString() : '--'}</td>
+                <td>${sourceTag}</td>
             </tr>`;
         }
-        document.getElementById('trades-body').innerHTML = html || '<tr><td colspan="12" class="neutral">No trades yet</td></tr>';
+        document.getElementById('trades-body').innerHTML = html || '<tr><td colspan="18" class="neutral">No trades yet</td></tr>';
     } catch(e) {
         console.error('Trades load failed:', e);
     }
 }
 
+// Trade filter dropdown
+document.getElementById('trade-bt-filter')?.addEventListener('change', loadTrades);
+
 // Chart tab
+let selectedTf = '4h';
+
+document.querySelectorAll('.tf-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+        document.querySelectorAll('.tf-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        selectedTf = btn.dataset.tf;
+        loadChart();
+    });
+});
+
 async function loadChart() {
-    const tf = document.getElementById('tf-select').value;
+    const tf = selectedTf;
     try {
         const res = await fetch(`${API}/api/candles/${tf}?limit=200`);
         const candles = await res.json();
@@ -284,7 +385,9 @@ async function loadChart() {
             decreasing: { line: { color: '#f87171' }, fillcolor: '#7f1d1d' },
         };
 
-        Plotly.newPlot('price-chart', [trace], {
+        const chartEl = document.getElementById('price-chart');
+        chartEl.innerHTML = '';
+        Plotly.newPlot(chartEl, [trace], {
             paper_bgcolor: '#111827',
             plot_bgcolor: '#0a0e17',
             font: { color: '#94a3b8', size: 11 },
@@ -300,8 +403,6 @@ async function loadChart() {
         console.error('Chart load failed:', e);
     }
 }
-
-document.getElementById('tf-select').addEventListener('change', loadChart);
 
 // Backtest tab
 async function loadBacktests() {
@@ -326,6 +427,109 @@ async function loadBacktests() {
         document.getElementById('backtest-body').innerHTML = html || '<tr><td colspan="8" class="neutral">No backtests yet. Run: python main.py backtest</td></tr>';
     } catch(e) {
         console.error('Backtests load failed:', e);
+    }
+}
+
+// Comparisons tab
+const COMPARE_METRICS = [
+    { key: 'total_trades',       label: 'Trades',            fmt: v => +v,                                higherBetter: false  },
+    { key: 'wins',               label: 'Wins',              fmt: v => +v,                                higherBetter: true   },
+    { key: 'losses',             label: 'Losses',            fmt: v => +v,                                higherBetter: false  },
+    { key: 'win_rate',           label: 'Win Rate',          fmt: v => ((+v)*100).toFixed(1)+'%',         higherBetter: true   },
+    { key: 'profit_factor',      label: 'Profit Factor',     fmt: v => isFinite(+v) ? (+v).toFixed(2) : 'N/A', higherBetter: true },
+    { key: 'total_pnl',          label: 'Total P&L',         fmt: v => '\u00a3'+(+v).toFixed(0),          higherBetter: true   },
+    { key: 'expectancy_pips',    label: 'Expectancy (pips)', fmt: v => ((+v)>=0?'+':'')+(+v).toFixed(1),  higherBetter: true   },
+    { key: 'max_drawdown',       label: 'Max Drawdown',      fmt: v => ((+v)*100).toFixed(1)+'%',         higherBetter: false  },
+    { key: 'sharpe_ratio',       label: 'Sharpe Ratio',      fmt: v => isFinite(+v) ? (+v).toFixed(2) : 'N/A', higherBetter: true },
+    { key: 'avg_win_pips',       label: 'Avg Win (pips)',    fmt: v => (+v).toFixed(1),                   higherBetter: true   },
+    { key: 'avg_loss_pips',      label: 'Avg Loss (pips)',   fmt: v => (+v).toFixed(1),                   higherBetter: false  },
+    { key: 'consecutive_losses', label: 'Max Con. Losses',   fmt: v => +v,                                higherBetter: false  },
+];
+
+async function loadComparisons() {
+    try {
+        const res = await fetch(`${API}/api/compare`);
+        const groups = await res.json();
+
+        // Only show groups with a baseline AND at least one variant
+        const comparable = groups.filter(g =>
+            g.runs.some(r => r.config === 'baseline') &&
+            g.runs.some(r => r.config !== 'baseline')
+        );
+
+        if (!comparable.length) {
+            document.getElementById('compare-groups').innerHTML = '<div class="card"><p class="neutral">No comparisons yet. Run: python main.py compare --no-overlap</p></div>';
+            return;
+        }
+
+        let html = '';
+        for (const group of comparable) {
+            const runs = group.runs;
+
+            // Most recent baseline
+            const baseline = runs.filter(r => r.config === 'baseline')
+                .sort((a,b) => new Date(b.timestamp) - new Date(a.timestamp))[0];
+
+            // Deduplicate variants by config — keep most recent of each
+            const seen = {};
+            for (const r of runs.filter(r => r.config !== 'baseline')) {
+                if (!seen[r.config] || new Date(r.timestamp) > new Date(seen[r.config].timestamp))
+                    seen[r.config] = r;
+            }
+            const variants = Object.values(seen);
+
+            let headerCols = '<th>Metric</th><th>Baseline</th>';
+            for (const v of variants) headerCols += `<th>${v.config}</th><th>Delta</th>`;
+
+            let rows = '';
+            for (const m of COMPARE_METRICS) {
+                const bVal = baseline[m.key] != null ? baseline[m.key] : 0;
+                let row = `<td class="compare-metric">${m.label}</td><td>${m.fmt(bVal)}</td>`;
+
+                for (const v of variants) {
+                    const vVal = v[m.key] != null ? v[m.key] : 0;
+                    const delta = vVal - bVal;
+                    const neutral = Math.abs(delta) < 0.0001;
+                    const improved = !neutral && (m.higherBetter ? delta > 0 : delta < 0);
+                    const cls = neutral ? '' : (improved ? 'positive' : 'negative');
+
+                    let dStr = '-';
+                    if (!neutral) {
+                        if (m.key === 'win_rate' || m.key === 'max_drawdown') {
+                            dStr = (delta >= 0 ? '+' : '') + (delta * 100).toFixed(1) + '%';
+                        } else if (m.key === 'total_pnl') {
+                            dStr = (delta >= 0 ? '+' : '') + '\u00a3' + Math.abs(delta).toFixed(0);
+                        } else if (Number.isInteger(bVal) && Number.isInteger(vVal)) {
+                            dStr = (delta >= 0 ? '+' : '') + delta;
+                        } else {
+                            dStr = (delta >= 0 ? '+' : '') + delta.toFixed(2);
+                        }
+                    }
+
+                    row += `<td class="${cls}">${m.fmt(vVal)}</td><td class="${cls}" style="font-size:12px">${dStr}</td>`;
+                }
+                rows += `<tr>${row}</tr>`;
+            }
+
+            html += `
+                <div class="card full-width" style="margin-bottom:24px">
+                    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+                        <h3 style="margin:0">${group.period}</h3>
+                        <span style="font-size:12px;color:#94a3b8">${variants.length} variant(s) vs baseline</span>
+                    </div>
+                    <div style="overflow-x:auto">
+                    <table class="compare-table">
+                        <thead><tr>${headerCols}</tr></thead>
+                        <tbody>${rows}</tbody>
+                    </table>
+                    </div>
+                </div>`;
+        }
+
+        document.getElementById('compare-groups').innerHTML = html;
+    } catch(e) {
+        console.error('Comparisons load failed:', e);
+        document.getElementById('compare-groups').innerHTML = '<div class="card"><p class="neutral">Failed to load comparisons</p></div>';
     }
 }
 
