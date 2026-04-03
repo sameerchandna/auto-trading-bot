@@ -487,6 +487,7 @@ async function loadBacktests() {
 
 // Comparisons tab
 const COMPARE_METRICS = [
+    { key: 'id',                 label: 'BT #',              fmt: v => '#'+(+v),                          higherBetter: false  },
     { key: 'total_trades',       label: 'Trades',            fmt: v => +v,                                higherBetter: false  },
     { key: 'wins',               label: 'Wins',              fmt: v => +v,                                higherBetter: true   },
     { key: 'losses',             label: 'Losses',            fmt: v => +v,                                higherBetter: false  },
