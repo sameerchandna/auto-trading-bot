@@ -11,7 +11,8 @@ from agents.learner import LearnerAgent
 from data.ingestion import fetch_candles, load_candles, save_candles, get_live_price
 from data.models import Candle
 from engine.event_bus import bus
-from config.settings import PAIR, TIMEFRAMES, TIMEFRAME_MINUTES, NO_OVERLAP_ENTRIES, BLOCK_HOURS_UTC
+from config.settings import TIMEFRAMES, TIMEFRAME_MINUTES, NO_OVERLAP_ENTRIES, BLOCK_HOURS_UTC
+from config.assets import ACTIVE_ASSETS, get_asset, resolve_pair_name
 
 logger = logging.getLogger(__name__)
 
@@ -19,7 +20,8 @@ logger = logging.getLogger(__name__)
 class TradingPipeline:
     """Main orchestration loop for the trading system."""
 
-    def __init__(self):
+    def __init__(self, pairs: list[str] | None = None):
+        self.pairs = pairs or list(ACTIVE_ASSETS)
         self.analyzer = MarketAnalyzerAgent()
         self.signal_gen = SignalGeneratorAgent()
         self.risk_mgr = RiskManagerAgent()
@@ -61,7 +63,7 @@ class TradingPipeline:
         logger.info("Trading pipeline initialized")
 
     def run_once(self) -> dict:
-        """Run a single cycle of the pipeline.
+        """Run a single cycle of the pipeline for all active pairs.
 
         Returns summary of what happened.
         """
@@ -72,20 +74,33 @@ class TradingPipeline:
             "positions_closed": 0,
         }
 
+        for pair_name in self.pairs:
+            asset = get_asset(pair_name)
+            pair_summary = self._run_pair(asset)
+            summary["signals"] += pair_summary["signals"]
+            summary["positions_opened"] += pair_summary["positions_opened"]
+
+        return summary
+
+    def _run_pair(self, asset) -> dict:
+        """Run analysis and trading for a single pair."""
+        pair_summary = {"signals": 0, "positions_opened": 0}
+        pair = asset.yahoo_ticker
+
         # 1. Fetch/load data
-        candles = self._get_candles()
+        candles = self._get_candles(pair)
         if not candles:
-            logger.warning("No candle data available")
-            return summary
+            logger.warning(f"No candle data available for {asset.name}")
+            return pair_summary
 
         # 2. Analyze
         analysis_result = self.analyzer.process({"candles": candles})
         context = analysis_result.get("context")
         if not context:
-            return summary
+            return pair_summary
 
         # 3. Check existing positions against current live price
-        live = get_live_price()
+        live = get_live_price(pair=pair)
         current_price = live.get("mid", 0) if live else 0
 
         if current_price == 0:
@@ -95,28 +110,28 @@ class TradingPipeline:
                     break
 
         if current_price > 0:
-            self.risk_mgr.update_positions(current_price)
+            self.risk_mgr.update_positions(current_price, pair=pair)
 
         # 4. Generate signals
         signal_result = self.signal_gen.process({"context": context})
         signals = signal_result.get("signals", [])
-        summary["signals"] = len(signals)
+        pair_summary["signals"] = len(signals)
 
         # 4b. Apply trading rules
         signals = self._filter_signals(signals, current_price)
-        summary["signals"] = len(signals)
+        pair_summary["signals"] = len(signals)
 
         # 5. Risk check and size
         if signals:
             risk_result = self.risk_mgr.process({"signals": signals})
             positions = risk_result.get("positions", [])
-            summary["positions_opened"] = len(positions)
+            pair_summary["positions_opened"] = len(positions)
 
             # 6. Execute
             if positions:
                 self.executor.process({"positions": positions})
 
-        return summary
+        return pair_summary
 
     def run_loop(self, interval_seconds: int = 60):
         """Run the pipeline in a loop."""
@@ -161,6 +176,7 @@ class TradingPipeline:
             if NO_OVERLAP_ENTRIES:
                 same_dir_open = any(
                     p.signal.direction == signal.direction
+                    and p.signal.pair == signal.pair
                     for p in self.risk_mgr.open_positions
                 )
                 if same_dir_open:
@@ -173,14 +189,15 @@ class TradingPipeline:
             logger.info(f"Trading rules filtered {skipped}/{len(signals)} signal(s)")
         return filtered
 
-    def _get_candles(self) -> dict[str, list[Candle]]:
-        """Get candles for all timeframes, fetching new data as needed."""
+    def _get_candles(self, pair: str) -> dict[str, list[Candle]]:
+        """Get candles for all timeframes for a specific pair."""
         all_candles = {}
         now = datetime.utcnow()
 
         for tf in TIMEFRAMES:
-            # Check if we need to re-fetch
-            last = self._last_fetch.get(tf)
+            # Check if we need to re-fetch (keyed by pair+tf)
+            fetch_key = f"{pair}:{tf}"
+            last = self._last_fetch.get(fetch_key)
             interval_min = TIMEFRAME_MINUTES.get(tf, 60)
 
             needs_fetch = (
@@ -190,19 +207,18 @@ class TradingPipeline:
 
             if needs_fetch:
                 try:
-                    candles = fetch_candles(pair=PAIR, timeframe=tf)
+                    candles = fetch_candles(pair=pair, timeframe=tf)
                     if candles:
-                        save_candles(candles, PAIR)
+                        save_candles(candles, pair)
                         all_candles[tf] = candles
-                        self._last_fetch[tf] = now
+                        self._last_fetch[fetch_key] = now
                     else:
-                        # Fall back to cached
-                        all_candles[tf] = load_candles(pair=PAIR, timeframe=tf)
+                        all_candles[tf] = load_candles(pair=pair, timeframe=tf)
                 except Exception as e:
-                    logger.warning(f"Fetch failed for {tf}: {e}, using cache")
-                    all_candles[tf] = load_candles(pair=PAIR, timeframe=tf)
+                    logger.warning(f"Fetch failed for {pair} {tf}: {e}, using cache")
+                    all_candles[tf] = load_candles(pair=pair, timeframe=tf)
             else:
-                all_candles[tf] = load_candles(pair=PAIR, timeframe=tf)
+                all_candles[tf] = load_candles(pair=pair, timeframe=tf)
 
         return all_candles
 

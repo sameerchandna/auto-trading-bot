@@ -7,6 +7,7 @@ from typing import Optional
 import httpx
 from dotenv import load_dotenv
 
+from config.assets import DEFAULT_ASSET, get_asset
 from data.models import Candle
 
 load_dotenv()
@@ -28,9 +29,6 @@ STREAM_URL = (
 )
 
 HEADERS = {"Authorization": f"Bearer {API_KEY}"}
-
-# OANDA instrument name for EURUSD
-INSTRUMENT = "EUR_USD"
 
 # Map our timeframes to OANDA granularities
 TF_MAP = {
@@ -54,12 +52,14 @@ def get_account_summary() -> dict:
     return r.json()["account"]
 
 
-def get_current_price() -> dict:
-    """Get current bid/ask price for EUR/USD."""
+def get_current_price(instrument: str | None = None) -> dict:
+    """Get current bid/ask price for an instrument."""
+    if instrument is None:
+        instrument = get_asset(DEFAULT_ASSET).oanda_instrument
     r = httpx.get(
         f"{BASE_URL}/v3/accounts/{ACCOUNT_ID}/pricing",
         headers=HEADERS,
-        params={"instruments": INSTRUMENT},
+        params={"instruments": instrument},
     )
     r.raise_for_status()
     prices = r.json()["prices"][0]
@@ -78,11 +78,14 @@ def fetch_candles(
     count: int = 200,
     from_time: Optional[datetime] = None,
     to_time: Optional[datetime] = None,
+    instrument: str | None = None,
 ) -> list[Candle]:
     """Fetch candles from OANDA.
 
     OANDA provides up to 5000 candles per request with full history.
     """
+    if instrument is None:
+        instrument = get_asset(DEFAULT_ASSET).oanda_instrument
     granularity = TF_MAP.get(timeframe)
     if not granularity:
         logger.warning(f"Unknown timeframe: {timeframe}")
@@ -113,7 +116,7 @@ def fetch_candles(
                 "to": chunk_end.strftime("%Y-%m-%dT%H:%M:%SZ"),
             }
             r = httpx.get(
-                f"{BASE_URL}/v3/instruments/{INSTRUMENT}/candles",
+                f"{BASE_URL}/v3/instruments/{instrument}/candles",
                 headers=HEADERS,
                 params=chunk_params,
                 timeout=30,
@@ -149,7 +152,7 @@ def fetch_candles(
         params["count"] = min(count, 5000)
 
     r = httpx.get(
-        f"{BASE_URL}/v3/instruments/{INSTRUMENT}/candles",
+        f"{BASE_URL}/v3/instruments/{instrument}/candles",
         headers=HEADERS,
         params=params,
         timeout=30,
@@ -182,6 +185,7 @@ def fetch_candles(
 def fetch_all_timeframes(
     timeframes: list[str] | None = None,
     count: int = 500,
+    instrument: str | None = None,
 ) -> dict[str, list[Candle]]:
     """Fetch candles for multiple timeframes from OANDA."""
     if timeframes is None:
@@ -190,7 +194,7 @@ def fetch_all_timeframes(
     all_candles = {}
     for tf in timeframes:
         try:
-            candles = fetch_candles(timeframe=tf, count=count)
+            candles = fetch_candles(timeframe=tf, count=count, instrument=instrument)
             all_candles[tf] = candles
         except Exception as e:
             logger.error(f"OANDA fetch failed for {tf}: {e}")
@@ -201,15 +205,24 @@ def fetch_all_timeframes(
 
 def fetch_extended_history(
     timeframe: str = "1h",
-    days_back: int = 365,
+    days_back: int | None = None,
+    instrument: str | None = None,
+    start: datetime | None = None,
 ) -> list[Candle]:
     """Fetch extended history by making multiple requests.
 
+    Defaults to the fixed HISTORY_START date for the given timeframe.
     OANDA allows 5000 candles per request, so we batch.
     """
+    from config.settings import HISTORY_START
     all_candles = []
     end = datetime.utcnow()
-    start = end - timedelta(days=days_back)
+    if start is not None:
+        pass  # use provided start
+    elif days_back is not None:
+        start = end - timedelta(days=days_back)
+    else:
+        start = HISTORY_START.get(timeframe, HISTORY_START["1d"])
 
     current_from = start
     while current_from < end:
@@ -219,6 +232,7 @@ def fetch_extended_history(
                 from_time=current_from,
                 to_time=end,
                 count=5000,
+                instrument=instrument,
             )
             if not batch:
                 break
@@ -252,8 +266,12 @@ def place_order(
     units: int,
     stop_loss: float,
     take_profit: float,
+    instrument: str | None = None,
+    price_decimals: int = 5,
 ) -> dict:
     """Place a market order on OANDA practice account."""
+    if instrument is None:
+        instrument = get_asset(DEFAULT_ASSET).oanda_instrument
     if direction == "short":
         units = -abs(units)
     else:
@@ -262,13 +280,13 @@ def place_order(
     order_data = {
         "order": {
             "type": "MARKET",
-            "instrument": INSTRUMENT,
+            "instrument": instrument,
             "units": str(units),
             "stopLossOnFill": {
-                "price": f"{stop_loss:.5f}",
+                "price": f"{stop_loss:.{price_decimals}f}",
             },
             "takeProfitOnFill": {
-                "price": f"{take_profit:.5f}",
+                "price": f"{take_profit:.{price_decimals}f}",
             },
             "timeInForce": "FOK",
         }

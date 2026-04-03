@@ -1,5 +1,6 @@
 """SQLite database setup and session management."""
 import json
+import sqlite3
 from datetime import datetime
 from typing import Optional
 
@@ -56,6 +57,7 @@ class PositionRecord(Base):
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     signal_id = Column(Integer, nullable=True)
+    pair = Column(String(20), default="EURUSD")
     status = Column(String(20), default="open")
     direction = Column(String(10), nullable=False)
     entry_price = Column(Float, nullable=False)
@@ -78,6 +80,7 @@ class TradeJournalRecord(Base):
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     position_id = Column(Integer, nullable=False)
+    pair = Column(String(20), default="EURUSD")
     analysis_snapshot = Column(Text, default="{}")
     max_favorable = Column(Float, default=0.0)
     max_adverse = Column(Float, default=0.0)
@@ -99,6 +102,7 @@ class BacktestRecord(Base):
     __tablename__ = "backtest_runs"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
+    pair = Column(String(20), default="EURUSD")
     timestamp = Column(DateTime, default=datetime.utcnow)
     start_date = Column(DateTime, nullable=False)
     end_date = Column(DateTime, nullable=False)
@@ -116,12 +120,24 @@ _engine = None
 _SessionFactory = None
 
 
+def _migrate_add_pair_columns():
+    """Add pair column to tables that lack it (backward-compatible)."""
+    conn = sqlite3.connect(str(DB_PATH))
+    for table in ["positions", "backtest_runs", "trade_journal"]:
+        cols = [row[1] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()]
+        if "pair" not in cols:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN pair VARCHAR(20) DEFAULT 'EURUSD'")
+    conn.commit()
+    conn.close()
+
+
 def get_engine():
     global _engine
     if _engine is None:
         DB_PATH.parent.mkdir(parents=True, exist_ok=True)
         _engine = create_engine(f"sqlite:///{DB_PATH}", echo=False)
         Base.metadata.create_all(_engine)
+        _migrate_add_pair_columns()
     return _engine
 
 

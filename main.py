@@ -9,6 +9,7 @@ from rich.table import Table
 from rich.panel import Panel
 
 from config.logging_config import setup_logging
+from config.assets import ASSETS, ACTIVE_ASSETS, get_asset, resolve_pair_name, DEFAULT_ASSET
 from config.settings import (
     PAIR, PAIR_NAME, STARTING_CAPITAL, TIMEFRAMES,
     DASHBOARD_HOST, DASHBOARD_PORT,
@@ -19,50 +20,73 @@ console = Console()
 
 
 @app.command()
-def fetch():
-    """Fetch latest EURUSD data for all timeframes."""
+def fetch(
+    pairs: str = typer.Option("", "--pairs", help="Comma-separated pairs to fetch (e.g. EURUSD,AUDUSD). Default: active assets"),
+):
+    """Fetch latest data for all timeframes."""
     setup_logging()
+    import time
     from data.ingestion import fetch_and_cache
 
-    console.print(Panel(f"Fetching {PAIR_NAME} data...", style="blue"))
-    data = fetch_and_cache(PAIR)
+    # Determine which pairs to fetch
+    if pairs:
+        pair_list = [p.strip().upper() for p in pairs.split(",")]
+        for p in pair_list:
+            get_asset(p)  # Validate asset exists
+    else:
+        pair_list = ACTIVE_ASSETS
 
-    table = Table(title="Data Summary")
-    table.add_column("Timeframe", style="cyan")
-    table.add_column("Candles", style="green")
-    table.add_column("From", style="dim")
-    table.add_column("To", style="dim")
+    for i, pair_name in enumerate(pair_list):
+        asset = get_asset(pair_name)
+        console.print(Panel(f"Fetching {pair_name} data...", style="blue"))
+        data = fetch_and_cache(asset.yahoo_ticker)
 
-    for tf, candles in data.items():
-        if candles:
-            table.add_row(
-                tf,
-                str(len(candles)),
-                candles[0].timestamp.strftime("%Y-%m-%d"),
-                candles[-1].timestamp.strftime("%Y-%m-%d"),
-            )
-        else:
-            table.add_row(tf, "0", "--", "--")
+        table = Table(title=f"{pair_name} Data Summary")
+        table.add_column("Timeframe", style="cyan")
+        table.add_column("Candles", style="green")
+        table.add_column("From", style="dim")
+        table.add_column("To", style="dim")
 
-    console.print(table)
+        for tf, candles in data.items():
+            if candles:
+                table.add_row(
+                    tf,
+                    str(len(candles)),
+                    candles[0].timestamp.strftime("%Y-%m-%d"),
+                    candles[-1].timestamp.strftime("%Y-%m-%d"),
+                )
+            else:
+                table.add_row(tf, "0", "--", "--")
+
+        console.print(table)
+
+        # Rate limit between pairs
+        if i < len(pair_list) - 1:
+            console.print("[dim]Waiting 0.5s before next pair...[/]")
+            time.sleep(0.5)
 
 
 @app.command()
-def analyze():
+def analyze(
+    pair: str = typer.Option(DEFAULT_ASSET, "--pair", help="Asset to analyze (e.g. EURUSD, XAUUSD)"),
+):
     """Run current market analysis on all timeframes."""
     setup_logging()
     from data.ingestion import fetch_and_cache
     from analysis.context import build_price_context
     from analysis.confluence import score_confluence
 
-    console.print(Panel(f"Analyzing {PAIR_NAME}...", style="blue"))
+    asset = get_asset(pair)
+    dec = asset.price_decimals
+
+    console.print(Panel(f"Analyzing {asset.name}...", style="blue"))
 
     # Fetch fresh data
-    all_candles = fetch_and_cache(PAIR)
-    context = build_price_context(all_candles)
+    all_candles = fetch_and_cache(asset.yahoo_ticker)
+    context = build_price_context(all_candles, pair=asset.name)
 
     # Display analysis
-    table = Table(title=f"{PAIR_NAME} Multi-Timeframe Analysis")
+    table = Table(title=f"{asset.name} Multi-Timeframe Analysis")
     table.add_column("TF", style="cyan")
     table.add_column("Bias", style="bold")
     table.add_column("Wave Phase")
@@ -83,8 +107,8 @@ def analyze():
                 f"[{bias_color}]{a.structure.bias.value}[/{bias_color}]",
                 a.wave.phase.value,
                 a.structure.last_break.value,
-                f"{a.atr:.5f}",
-                f"{a.current_price:.5f}",
+                f"{a.atr:.{dec}f}",
+                f"{a.current_price:.{dec}f}",
                 str(len(a.sr_zones)),
             )
 
@@ -104,8 +128,8 @@ def analyze():
             console.print(
                 f"  [{color}]{s.direction.value.upper()}[/{color}] | "
                 f"Score: {s.confluence_score:.0%} | "
-                f"Entry: {s.entry_price:.5f} | "
-                f"SL: {s.stop_loss:.5f} | TP: {s.take_profit:.5f}"
+                f"Entry: {s.entry_price:.{dec}f} | "
+                f"SL: {s.stop_loss:.{dec}f} | TP: {s.take_profit:.{dec}f}"
             )
     else:
         console.print("\n[dim]No signals at current confluence threshold[/]")
@@ -114,20 +138,31 @@ def analyze():
 @app.command()
 def run(
     interval: int = typer.Option(60, help="Loop interval in seconds (default 60s)"),
+    pairs: str = typer.Option("", "--pairs", help="Comma-separated pairs to trade (default: active assets)"),
 ):
     """Start the trading bot on OANDA practice account."""
     setup_logging()
     from engine.pipeline import TradingPipeline
 
+    # Parse pairs
+    if pairs:
+        pair_list = [p.strip().upper() for p in pairs.split(",")]
+        for p in pair_list:
+            get_asset(p)  # Validate
+    else:
+        pair_list = list(ACTIVE_ASSETS)
+
     # Show OANDA account info
     try:
         from data.oanda import get_account_summary, get_current_price
         acct = get_account_summary()
-        price = get_current_price()
+        first_asset = get_asset(pair_list[0])
+        price = get_current_price(instrument=first_asset.oanda_instrument)
+        dec = first_asset.price_decimals
         console.print(Panel(
             f"OANDA Practice Account Connected\n"
             f"Balance: \u00a3{float(acct['balance']):,.2f}\n"
-            f"EUR/USD: {price['mid']:.5f} (spread: {price['spread']*10000:.1f} pips)\n"
+            f"{first_asset.name}: {price['mid']:.{dec}f} (spread: {price['spread']/first_asset.pip_value:.1f} pips)\n"
             f"Tradeable: {price['tradeable']}",
             title="OANDA",
             style="green",
@@ -136,7 +171,8 @@ def run(
         console.print(f"[yellow]OANDA not available: {e}[/]")
 
     console.print(Panel(
-        f"Starting {PAIR_NAME} Trading Bot\n"
+        f"Starting Trading Bot\n"
+        f"Pairs: {', '.join(pair_list)}\n"
         f"Mode: OANDA Practice Account\n"
         f"Interval: {interval}s\n"
         f"Risk: 2% per trade, max 3 positions",
@@ -144,7 +180,7 @@ def run(
         style="green",
     ))
 
-    pipeline = TradingPipeline()
+    pipeline = TradingPipeline(pairs=pair_list)
     pipeline.setup()
     pipeline.run_loop(interval_seconds=interval)
 
@@ -154,11 +190,13 @@ def backtest(
     start: str = typer.Option("2024-01-01", help="Start date YYYY-MM-DD"),
     end: str = typer.Option(None, help="End date YYYY-MM-DD (default: today)"),
     capital: float = typer.Option(10_000, help="Starting capital"),
+    pair: str = typer.Option(DEFAULT_ASSET, "--pair", help="Asset to backtest (e.g. EURUSD, XAUUSD, US30)"),
     no_overlap: bool = typer.Option(False, "--no-overlap", help="Block same-direction entries when a position is already open"),
-    min_score: float = typer.Option(0.60, "--min-score", help="Minimum confluence score to enter a trade"),
+    min_score: float = typer.Option(0.0, "--min-score", help="Additional min score filter (0=use params threshold only)"),
     block_hours: str = typer.Option("", "--block-hours", help="Comma-separated UTC hours to skip (e.g. '17,18,19')"),
     block_days: str = typer.Option("", "--block-days", help="Comma-separated days to skip: mon,tue,wed,thu,fri"),
     cooldown: int = typer.Option(0, "--cooldown", help="Skip N signals after this many consecutive losses"),
+    exclude_tf: str = typer.Option("", "--exclude-tf", help="Comma-separated timeframes to exclude (e.g. '15m')"),
     label: str = typer.Option("", "--label", help="Optional label for this run"),
 ):
     """Run a backtest on historical data."""
@@ -178,11 +216,14 @@ def backtest(
         block_hours=[int(h) for h in block_hours.split(",") if h.strip()] if block_hours else [],
         block_days=[day_map[d.strip().lower()] for d in block_days.split(",") if d.strip()] if block_days else [],
         cooldown_after_losses=cooldown,
+        exclude_timeframes=[t.strip() for t in exclude_tf.split(",") if t.strip()] if exclude_tf else [],
     )
     cfg_label = label or cfg.label()
 
+    asset = get_asset(pair)
+
     console.print(Panel(
-        f"Backtesting {PAIR_NAME}\n"
+        f"Backtesting {asset.name}\n"
         f"Period: {start} to {end_date.strftime('%Y-%m-%d')}\n"
         f"Capital: \u00a3{capital:,}\n"
         f"Config:  {cfg_label}",
@@ -190,7 +231,7 @@ def backtest(
         style="blue",
     ))
 
-    engine = BacktestEngine(start_date, end_date, capital, config=cfg)
+    engine = BacktestEngine(start_date, end_date, capital, config=cfg, pair=pair)
     results = engine.run()
 
     if "error" in results:
@@ -198,8 +239,8 @@ def backtest(
         return
 
     metrics = results["metrics"]
-    _print_metrics_table(metrics, title=f"Backtest Results — {cfg_label}")
-    _save_backtest(engine, metrics, start_date, end_date, cfg, cfg_label)
+    _print_metrics_table(metrics, title=f"Backtest Results — {asset.name} — {cfg_label}")
+    _save_backtest(engine, metrics, start_date, end_date, cfg, cfg_label, pair=pair)
 
 
 def _print_metrics_table(metrics: dict, title: str = "Backtest Results"):
@@ -217,13 +258,14 @@ def _print_metrics_table(metrics: dict, title: str = "Backtest Results"):
     console.print(table)
 
 
-def _save_backtest(engine, metrics: dict, start_date, end_date, cfg, cfg_label: str):
+def _save_backtest(engine, metrics: dict, start_date, end_date, cfg, cfg_label: str, pair: str = DEFAULT_ASSET):
     from storage.database import BacktestRecord, PositionRecord, TradeJournalRecord, get_session
     import json
 
     session = get_session()
     try:
         rec = BacktestRecord(
+            pair=pair,
             start_date=start_date,
             end_date=end_date,
             params_json=json.dumps({"config": cfg_label}),
@@ -247,6 +289,7 @@ def _save_backtest(engine, metrics: dict, start_date, end_date, cfg, cfg_label: 
 
             pos_rec = PositionRecord(
                 signal_id=None,
+                pair=pair,
                 status="closed",
                 direction=pos.signal.direction.value,
                 entry_price=pos.entry_price,
@@ -268,6 +311,7 @@ def _save_backtest(engine, metrics: dict, start_date, end_date, cfg, cfg_label: 
 
             journal = TradeJournalRecord(
                 position_id=pos_rec.id,
+                pair=pair,
                 duration_minutes=duration_mins,
             )
             session.add(journal)
@@ -284,11 +328,13 @@ def compare(
     start: str = typer.Option("2023-01-01", help="Start date YYYY-MM-DD"),
     end: str = typer.Option(None, help="End date YYYY-MM-DD (default: today)"),
     capital: float = typer.Option(10_000, help="Starting capital"),
+    pair: str = typer.Option(DEFAULT_ASSET, "--pair", help="Asset to compare"),
     no_overlap: bool = typer.Option(False, "--no-overlap"),
-    min_score: float = typer.Option(0.60, "--min-score"),
+    min_score: float = typer.Option(0.0, "--min-score"),
     block_hours: str = typer.Option("", "--block-hours"),
     block_days: str = typer.Option("", "--block-days"),
     cooldown: int = typer.Option(0, "--cooldown"),
+    exclude_tf: str = typer.Option("", "--exclude-tf", help="Comma-separated timeframes to exclude (e.g. '15m')"),
 ):
     """Run baseline vs. a modified config and show side-by-side results."""
     setup_logging()
@@ -306,6 +352,7 @@ def compare(
         block_hours=[int(h) for h in block_hours.split(",") if h.strip()] if block_hours else [],
         block_days=[day_map[d.strip().lower()] for d in block_days.split(",") if d.strip()] if block_days else [],
         cooldown_after_losses=cooldown,
+        exclude_timeframes=[t.strip() for t in exclude_tf.split(",") if t.strip()] if exclude_tf else [],
     )
 
     if test_cfg.label() == "baseline":
@@ -321,12 +368,12 @@ def compare(
 
     # Run baseline
     console.print("\n[dim]Running baseline...[/]")
-    base_engine = BacktestEngine(start_date, end_date, capital, config=BASELINE)
+    base_engine = BacktestEngine(start_date, end_date, capital, config=BASELINE, pair=pair)
     base_results = base_engine.run()
 
     # Run test
     console.print(f"[dim]Running {test_cfg.label()}...[/]")
-    test_engine = BacktestEngine(start_date, end_date, capital, config=test_cfg)
+    test_engine = BacktestEngine(start_date, end_date, capital, config=test_cfg, pair=pair)
     test_results = test_engine.run()
 
     if "error" in base_results or "error" in test_results:
@@ -386,8 +433,8 @@ def compare(
     console.print(table)
 
     # Save both to DB
-    _save_backtest(base_engine, bm, start_date, end_date, BASELINE, "baseline")
-    _save_backtest(test_engine, tm, start_date, end_date, test_cfg, test_cfg.label())
+    _save_backtest(base_engine, bm, start_date, end_date, BASELINE, "baseline", pair=pair)
+    _save_backtest(test_engine, tm, start_date, end_date, test_cfg, test_cfg.label(), pair=pair)
 
 
 @app.command()
@@ -410,27 +457,35 @@ def dashboard():
 
 
 @app.command()
-def status():
+def status(
+    pair: str = typer.Option("", "--pair", help="Filter by pair (default: all)"),
+):
     """Show current bot status and stats."""
     setup_logging(logging.WARNING)
     from storage.database import PositionRecord, get_session
 
     session = get_session()
     try:
-        open_pos = session.query(PositionRecord).filter_by(status="open").all()
-        closed_pos = session.query(PositionRecord).filter_by(status="closed").all()
+        query_open = session.query(PositionRecord).filter_by(status="open")
+        query_closed = session.query(PositionRecord).filter_by(status="closed")
+        if pair:
+            query_open = query_open.filter_by(pair=pair)
+            query_closed = query_closed.filter_by(pair=pair)
+
+        open_pos = query_open.all()
+        closed_pos = query_closed.all()
 
         total_pnl = sum(p.pnl for p in closed_pos if p.pnl)
         wins = sum(1 for p in closed_pos if p.pnl and p.pnl > 0)
-        losses = len(closed_pos) - wins
 
+        pair_label = pair or "All Pairs"
         console.print(Panel(
-            f"Pair: {PAIR_NAME}\n"
+            f"Pair: {pair_label}\n"
             f"Capital: \u00a3{STARTING_CAPITAL + total_pnl:,.2f}\n"
             f"Total P&L: \u00a3{total_pnl:+,.2f}\n"
             f"Open Positions: {len(open_pos)}\n"
             f"Closed Trades: {len(closed_pos)}\n"
-            f"Win Rate: {wins/len(closed_pos):.1%}" if closed_pos else f"Pair: {PAIR_NAME}\nCapital: \u00a3{STARTING_CAPITAL:,}\nNo trades yet",
+            f"Win Rate: {wins/len(closed_pos):.1%}" if closed_pos else f"Pair: {pair_label}\nCapital: \u00a3{STARTING_CAPITAL:,}\nNo trades yet",
             title="Bot Status",
             style="cyan",
         ))
@@ -438,17 +493,23 @@ def status():
         if open_pos:
             table = Table(title="Open Positions")
             table.add_column("ID")
+            table.add_column("Pair")
             table.add_column("Direction")
             table.add_column("Entry")
             table.add_column("SL")
             table.add_column("TP")
             table.add_column("Size")
             for p in open_pos:
+                p_pair = p.pair or DEFAULT_ASSET
+                try:
+                    dec = get_asset(p_pair).price_decimals
+                except KeyError:
+                    dec = 5
                 table.add_row(
-                    str(p.id), p.direction,
-                    f"{p.entry_price:.5f}",
-                    f"{p.stop_loss:.5f}" if p.stop_loss else "--",
-                    f"{p.take_profit:.5f}" if p.take_profit else "--",
+                    str(p.id), p_pair, p.direction,
+                    f"{p.entry_price:.{dec}f}",
+                    f"{p.stop_loss:.{dec}f}" if p.stop_loss else "--",
+                    f"{p.take_profit:.{dec}f}" if p.take_profit else "--",
                     f"{p.size:,.0f}",
                 )
             console.print(table)

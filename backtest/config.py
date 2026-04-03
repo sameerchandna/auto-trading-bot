@@ -14,8 +14,8 @@ class BacktestConfig:
     no_overlap: bool = False
     """Block a new entry if a position in the same direction is already open."""
 
-    min_score: float = 0.60
-    """Minimum confluence score required to enter a trade (default 0.60)."""
+    min_score: float = 0.0
+    """Additional min score filter on top of params threshold (0=disabled)."""
 
     # --- Time filtering ---
     block_hours: list[int] = field(default_factory=list)
@@ -28,12 +28,16 @@ class BacktestConfig:
     cooldown_after_losses: int = 0
     """Skip the next N signals after a run of this many consecutive losses."""
 
+    # --- Timeframe filtering ---
+    exclude_timeframes: list[str] = field(default_factory=list)
+    """Timeframes to exclude from analysis (e.g. ['15m'] to skip 15-min candles)."""
+
     def label(self) -> str:
         """Short human-readable label for this config."""
         parts = []
         if self.no_overlap:
             parts.append("no-overlap")
-        if self.min_score != 0.60:
+        if self.min_score > 0:
             parts.append(f"score>={self.min_score:.2f}")
         if self.block_hours:
             parts.append(f"block-h{self.block_hours}")
@@ -42,6 +46,8 @@ class BacktestConfig:
             parts.append(f"block-{'+'.join(day_names[d] for d in self.block_days)}")
         if self.cooldown_after_losses:
             parts.append(f"cooldown-{self.cooldown_after_losses}")
+        if self.exclude_timeframes:
+            parts.append(f"no-{'+'.join(self.exclude_timeframes)}")
         return ", ".join(parts) if parts else "baseline"
 
     def tags(self) -> list[str]:
@@ -49,7 +55,7 @@ class BacktestConfig:
         t = ["backtest"]
         if self.no_overlap:
             t.append("no_overlap")
-        if self.min_score != 0.60:
+        if self.min_score > 0:
             t.append(f"min_score_{self.min_score:.2f}")
         if self.block_hours:
             t.append("block_hours")
@@ -57,6 +63,8 @@ class BacktestConfig:
             t.append("block_days")
         if self.cooldown_after_losses:
             t.append(f"cooldown_{self.cooldown_after_losses}")
+        if self.exclude_timeframes:
+            t.append(f"no_{'_'.join(self.exclude_timeframes)}")
         return t
 
 
@@ -71,7 +79,14 @@ PRODUCTION = BacktestConfig(
 )
 
 NO_OVERLAP = BacktestConfig(no_overlap=True)
-HIGH_SCORE = BacktestConfig(min_score=0.70)
+HIGH_SCORE = BacktestConfig(min_score=0.50)
 BLOCK_BAD_HOURS = BacktestConfig(block_hours=[17, 18, 19, 20])
 BLOCK_BAD_DAYS = BacktestConfig(block_days=[3, 4])  # Thu, Fri
 COOLDOWN_2 = BacktestConfig(cooldown_after_losses=2)
+
+# Production without 15m — test if removing 15m candles matches PineScript (1H entry TF)
+PRODUCTION_NO_15M = BacktestConfig(
+    no_overlap=True,
+    block_hours=[17, 18, 19, 20],
+    exclude_timeframes=["15m"],
+)

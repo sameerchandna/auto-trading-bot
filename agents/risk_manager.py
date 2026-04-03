@@ -9,12 +9,9 @@ from config.settings import (
     STARTING_CAPITAL, MAX_RISK_PER_TRADE, MAX_CONCURRENT_POSITIONS,
     MAX_PORTFOLIO_RISK, DAILY_LOSS_LIMIT, WEEKLY_LOSS_LIMIT,
 )
+from config.assets import get_asset, resolve_pair_name
 
 logger = logging.getLogger(__name__)
-
-# Pip value for EURUSD (standard lot = 100,000 units)
-PIP_VALUE = 0.0001
-LOT_SIZE = 100_000
 
 
 class RiskManagerAgent(BaseAgent):
@@ -101,14 +98,13 @@ class RiskManagerAgent(BaseAgent):
             return None
 
         # Position size: risk_amount / sl_distance = units
-        # For EURUSD, pip value per unit = PIP_VALUE (~0.0001)
-        # So for N units, 1 pip move = N * PIP_VALUE in base currency
         # We want: N * sl_distance = risk_per_trade (in account currency)
         # Simplified: assume GBP ~ USD for now (will add conversion later)
         size_units = risk_per_trade / sl_distance
 
-        # Cap at reasonable lot size (2 standard lots max)
-        size_units = min(size_units, LOT_SIZE * 2)
+        # Cap at reasonable size (2 standard lots max for this asset)
+        asset = get_asset(resolve_pair_name(signal.pair))
+        size_units = min(size_units, asset.lot_size * 2)
 
         position = Position(
             signal=signal,
@@ -120,7 +116,7 @@ class RiskManagerAgent(BaseAgent):
             tags=[signal.signal_type.value],
         )
 
-        sl_pips = sl_distance / PIP_VALUE
+        sl_pips = sl_distance / asset.pip_value
         self.logger.info(
             f"APPROVED: {signal.direction.value} | "
             f"size={size_units:.0f} units | "
@@ -136,10 +132,11 @@ class RiskManagerAgent(BaseAgent):
         position.exit_price = exit_price
         position.closed_at = self.now
 
+        asset = get_asset(resolve_pair_name(position.signal.pair))
         if position.signal.direction == Direction.LONG:
-            pnl_pips = (exit_price - position.entry_price) / PIP_VALUE
+            pnl_pips = (exit_price - position.entry_price) / asset.pip_value
         else:
-            pnl_pips = (position.entry_price - exit_price) / PIP_VALUE
+            pnl_pips = (position.entry_price - exit_price) / asset.pip_value
 
         position.pnl_pips = round(pnl_pips, 1)
         # P&L = price_change * position_size (matches our sizing: size = risk / sl_distance)
@@ -161,9 +158,11 @@ class RiskManagerAgent(BaseAgent):
 
         bus.publish("position_closed", position)
 
-    def update_positions(self, current_price: float):
-        """Check SL/TP for open positions."""
+    def update_positions(self, current_price: float, pair: str | None = None):
+        """Check SL/TP for open positions, optionally filtered by pair."""
         for position in self.open_positions[:]:
+            if pair and position.signal.pair != pair:
+                continue
             signal = position.signal
 
             if signal.direction == Direction.LONG:
@@ -178,7 +177,7 @@ class RiskManagerAgent(BaseAgent):
                     self.close_position(position, signal.take_profit)
 
     def _reset_daily_weekly(self):
-        today = datetime.utcnow().date()
+        today = self.now.date()
         if today != self.last_daily_reset:
             self.daily_pnl = 0.0
             self.last_daily_reset = today

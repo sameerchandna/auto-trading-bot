@@ -7,10 +7,12 @@ from data.models import Candle, Position, Direction, TradeStatus
 from data.ingestion import fetch_candles, save_candles, load_candles
 from analysis.context import build_price_context
 from analysis.confluence import score_confluence
-from agents.risk_manager import RiskManagerAgent, PIP_VALUE
+from agents.risk_manager import RiskManagerAgent
 from backtest.metrics import calculate_metrics
 from backtest.config import BacktestConfig, BASELINE
-from config.settings import PAIR, TIMEFRAMES, CONFLUENCE_WEIGHTS
+from config.settings import TIMEFRAMES
+from config.assets import get_asset
+from config.params import load_strategy_params
 
 logger = logging.getLogger(__name__)
 
@@ -30,11 +32,15 @@ class BacktestEngine:
         end_date: datetime,
         initial_capital: float = 10_000,
         config: BacktestConfig | None = None,
+        pair: str = "EURUSD",
     ):
         self.start_date = start_date
         self.end_date = end_date
         self.initial_capital = initial_capital
         self.config = config or BASELINE
+        self.pair = pair
+        self.asset = get_asset(pair)
+        self.params = load_strategy_params()
         self.risk_mgr = RiskManagerAgent()
         self.risk_mgr.capital = initial_capital
 
@@ -49,7 +55,7 @@ class BacktestEngine:
         Returns dict with metrics and trade history.
         """
         if weights is None:
-            weights = CONFLUENCE_WEIGHTS
+            weights = self.params["weights"]
 
         logger.info(
             f"Backtest: {self.start_date.date()} to {self.end_date.date()} | "
@@ -57,20 +63,21 @@ class BacktestEngine:
         )
 
         # Load historical data from cache first, fetch only if missing
+        active_tfs = [tf for tf in TIMEFRAMES if tf not in self.config.exclude_timeframes]
         all_candles = {}
-        for tf in TIMEFRAMES:
+        for tf in active_tfs:
             candles = load_candles(
-                pair=PAIR, timeframe=tf, limit=10000,
+                pair=self.asset.yahoo_ticker, timeframe=tf, limit=10000,
                 start=self.start_date, end=self.end_date,
             )
             if not candles:
                 try:
                     candles = fetch_candles(
-                        pair=PAIR, timeframe=tf,
+                        pair=self.asset.yahoo_ticker, timeframe=tf,
                         start=self.start_date, end=self.end_date,
                     )
                     if candles:
-                        save_candles(candles, PAIR)
+                        save_candles(candles, self.asset.yahoo_ticker)
                 except Exception as e:
                     logger.debug(f"Fetch failed for {tf}: {e}")
             if candles:
@@ -96,8 +103,8 @@ class BacktestEngine:
         for tf, candles in all_candles.items():
             sorted_candles[tf] = sorted(candles, key=lambda c: c.timestamp)
 
-        # Walk forward through every 4th candle (4h effective sampling on 1h data)
-        step = 4 if iter_tf == "1h" else 1
+        # Walk forward through every candle (must match PineScript 1H evaluation)
+        step = 1
         last_date = None
         for i in range(50, len(iter_candles), step):
             current_date = iter_candles[i].timestamp
@@ -126,7 +133,7 @@ class BacktestEngine:
 
             # Run analysis
             try:
-                context = build_price_context(candle_windows)
+                context = build_price_context(candle_windows, pair=self.pair)
             except Exception as e:
                 logger.debug(f"Analysis error at {current_date}: {e}")
                 continue
@@ -149,7 +156,12 @@ class BacktestEngine:
             self._tracked_closed_count = len(current_closed)
 
             # Generate signals
-            signals = score_confluence(context, weights)
+            signals = score_confluence(
+                context, weights,
+                threshold=self.params["threshold"],
+                sl_atr_mult=self.params["sl_multiplier"],
+                tp_rr=self.params["tp_risk_reward"],
+            )
 
             # Apply config filters before execution
             signals = self._apply_filters(signals, current_date)
@@ -160,13 +172,13 @@ class BacktestEngine:
                 positions = result.get("positions", [])
                 self.all_trades.extend(positions)
 
-            # Record equity
+            # Record equity (price_change * size, matching close_position() formula)
             unrealized = 0
             for pos in self.risk_mgr.open_positions:
                 if pos.signal.direction == Direction.LONG:
-                    unrealized += (current_price - pos.entry_price) / PIP_VALUE * (pos.size / 100_000) * 10
+                    unrealized += (current_price - pos.entry_price) * pos.size
                 else:
-                    unrealized += (pos.entry_price - current_price) / PIP_VALUE * (pos.size / 100_000) * 10
+                    unrealized += (pos.entry_price - current_price) * pos.size
 
             self.equity_curve.append((
                 current_date,
@@ -197,6 +209,7 @@ class BacktestEngine:
             "metrics": metrics,
             "equity_curve": [(t.isoformat(), v) for t, v in self.equity_curve],
             "trades": len(closed),
+            "pair": self.pair,
             "start_date": self.start_date.isoformat(),
             "end_date": self.end_date.isoformat(),
             "config_label": self.config.label(),

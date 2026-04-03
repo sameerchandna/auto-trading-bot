@@ -26,6 +26,14 @@ Multi-agent pipeline: Data Ingestion -> Analysis -> Signal Generation -> Risk Ma
 - `python main.py backtest` - Run backtests
 - `python main.py dashboard` - Launch web dashboard
 - `python main.py fetch` - Fetch latest data
+- `/update-strategy` - Full pipeline: change params -> sync pine -> backtest -> update dashboard
+
+## Strategy Sync (BT <-> PineScript)
+- **Single source of truth**: `config/optimized_params.json` holds all strategy params (weights, threshold, SL/TP multipliers, swing lookback)
+- **Backtest engine** loads params via `config/params.py:load_strategy_params()`
+- **PineScript generator**: `python -m tradingview.generate_pine` injects params into pine input defaults
+- **Check sync**: `python -m tradingview.generate_pine --check` (exits 1 if out of sync)
+- When changing strategy logic (not just params), update BOTH `analysis/confluence.py` AND the corresponding PineScript scoring section
 
 ## Rules
 - Max 2% risk per trade

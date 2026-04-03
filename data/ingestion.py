@@ -1,4 +1,8 @@
-"""Data ingestion - OANDA primary, Yahoo Finance fallback, with local caching."""
+"""Data ingestion - OANDA only, with local caching.
+
+Yahoo Finance fallback is disabled. All data must come from OANDA to ensure
+consistent 21:00/22:00 UTC timestamps across all assets.
+"""
 import logging
 import os
 from datetime import datetime, timedelta
@@ -6,98 +10,44 @@ from typing import Optional
 
 from dotenv import load_dotenv
 
-from config.settings import PAIR, PAIR_NAME, TIMEFRAMES, MAX_HISTORY_DAYS
+from config.assets import get_asset, DEFAULT_ASSET, resolve_pair_name
+from config.settings import PAIR, PAIR_NAME, TIMEFRAMES, HISTORY_START
 from data.models import Candle
 from storage.database import CandleRecord, get_session
 
 load_dotenv()
 logger = logging.getLogger(__name__)
 
-# Use OANDA if API key is set, otherwise fall back to Yahoo
-USE_OANDA = bool(os.getenv("OANDA_API_KEY"))
+
+def _resolve_instrument(pair: str) -> str:
+    """Resolve any pair string to an OANDA instrument code."""
+    asset_name = resolve_pair_name(pair)
+    return get_asset(asset_name).oanda_instrument
 
 
 def fetch_candles(
     pair: str = PAIR,
     timeframe: str = "1d",
+    count: int = 500,
+    start: Optional[datetime] = None,
+    end: Optional[datetime] = None,
+    # disabled — kept for call-site compatibility but ignored
     days_back: Optional[int] = None,
-    count: int = 500,
-    start: Optional[datetime] = None,
-    end: Optional[datetime] = None,
 ) -> list[Candle]:
-    """Fetch OHLCV candles from the configured data source."""
-    if USE_OANDA:
-        return _fetch_oanda(timeframe, count, start, end)
-    else:
-        return _fetch_yahoo(pair, timeframe, days_back, start, end)
-
-
-def _fetch_oanda(
-    timeframe: str,
-    count: int = 500,
-    start: Optional[datetime] = None,
-    end: Optional[datetime] = None,
-) -> list[Candle]:
-    """Fetch from OANDA REST API."""
+    """Fetch OHLCV candles from OANDA."""
     from data.oanda import fetch_candles as oanda_fetch
 
+    instrument = _resolve_instrument(pair)
+
     if start and end:
-        candles = oanda_fetch(timeframe=timeframe, from_time=start, to_time=end)
-    else:
-        candles = oanda_fetch(timeframe=timeframe, count=count)
-
-    return candles
+        return oanda_fetch(timeframe=timeframe, from_time=start, to_time=end, instrument=instrument)
+    return oanda_fetch(timeframe=timeframe, count=count, instrument=instrument)
 
 
-def _fetch_yahoo(
-    pair: str,
-    timeframe: str,
-    days_back: Optional[int] = None,
-    start: Optional[datetime] = None,
-    end: Optional[datetime] = None,
-) -> list[Candle]:
-    """Fetch from Yahoo Finance (fallback)."""
-    import pandas as pd
-    import yfinance as yf
-
-    if days_back is None:
-        days_back = MAX_HISTORY_DAYS.get(timeframe, 60)
-
-    if end is None:
-        end = datetime.utcnow()
-    if start is None:
-        start = end - timedelta(days=days_back)
-
-    logger.info(f"Yahoo: Fetching {pair} {timeframe} from {start.date()} to {end.date()}")
-
-    ticker = yf.Ticker(pair)
-    df = ticker.history(
-        start=start.strftime("%Y-%m-%d"),
-        end=end.strftime("%Y-%m-%d"),
-        interval=timeframe,
-    )
-
-    if df.empty:
-        logger.warning(f"No data returned for {pair} {timeframe}")
-        return []
-
-    candles = []
-    for ts, row in df.iterrows():
-        ts = pd.Timestamp(ts)
-        if ts.tzinfo:
-            ts = ts.tz_localize(None)
-        candles.append(Candle(
-            timestamp=ts.to_pydatetime(),
-            timeframe=timeframe,
-            open=round(float(row["Open"]), 5),
-            high=round(float(row["High"]), 5),
-            low=round(float(row["Low"]), 5),
-            close=round(float(row["Close"]), 5),
-            volume=float(row.get("Volume", 0)),
-        ))
-
-    logger.info(f"Yahoo: Fetched {len(candles)} candles for {pair} {timeframe}")
-    return candles
+# _fetch_yahoo is disabled — Yahoo data produces inconsistent timestamps.
+# All fetches must go through OANDA.
+def _fetch_yahoo(*args, **kwargs):
+    raise RuntimeError("Yahoo Finance is disabled. Use OANDA for all data fetching.")
 
 
 def fetch_all_timeframes(pair: str = PAIR) -> dict[str, list[Candle]]:
@@ -198,9 +148,7 @@ def fetch_and_cache(pair: str = PAIR) -> dict[str, list[Candle]]:
     return all_data
 
 
-def get_live_price() -> dict:
+def get_live_price(pair: str = PAIR) -> dict:
     """Get current live price from OANDA."""
-    if USE_OANDA:
-        from data.oanda import get_current_price
-        return get_current_price()
-    return {}
+    from data.oanda import get_current_price
+    return get_current_price(instrument=_resolve_instrument(pair))

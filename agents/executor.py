@@ -10,6 +10,7 @@ from agents.base import BaseAgent
 from data.models import Position, TradeStatus, Direction
 from storage.database import PositionRecord, SignalRecord, get_session
 from engine.event_bus import bus
+from config.assets import get_asset, resolve_pair_name
 
 load_dotenv()
 logger = logging.getLogger(__name__)
@@ -65,12 +66,15 @@ class ExecutorAgent(BaseAgent):
         try:
             from data.oanda import place_order
 
+            asset = get_asset(resolve_pair_name(position.signal.pair))
             units = int(position.size)
             result = place_order(
                 direction=position.signal.direction.value,
                 units=units,
                 stop_loss=position.signal.stop_loss,
                 take_profit=position.signal.take_profit,
+                instrument=asset.oanda_instrument,
+                price_decimals=asset.price_decimals,
             )
 
             # Extract trade ID from response
@@ -82,7 +86,7 @@ class ExecutorAgent(BaseAgent):
                 actual_price = float(fill.get("price", 0))
                 self.logger.info(
                     f"OANDA EXECUTED: {position.signal.direction.value} "
-                    f"{units} units @ {actual_price:.5f} | "
+                    f"{units} units @ {actual_price:.{asset.price_decimals}f} | "
                     f"Trade ID: {trade_id}"
                 )
                 # Update position with actual fill price
@@ -117,6 +121,7 @@ class ExecutorAgent(BaseAgent):
 
             pos_rec = PositionRecord(
                 signal_id=signal_rec.id,
+                pair=resolve_pair_name(position.signal.pair),
                 status=position.status.value,
                 direction=position.signal.direction.value,
                 entry_price=position.entry_price,

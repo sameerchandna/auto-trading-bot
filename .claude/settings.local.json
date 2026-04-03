@@ -3,7 +3,8 @@
     "allow": [
       "Bash(pip --version)",
       "Bash(npm --version)",
-      "WebSearch"
+      "WebSearch",
+      "Bash(python -c \"from main import app; from backtest.config import BacktestConfig; from backtest.engine import BacktestEngine; print\\('All imports OK'\\)\")"
     ]
   }
 }

@@ -8,41 +8,42 @@ body {
     font-family: 'Segoe UI', -apple-system, sans-serif;
     background: #0a0e17;
     color: #e0e6ed;
-    line-height: 1.5;
+    font-size: 12px;
+    line-height: 1.4;
 }
 
 header {
     background: #111827;
     border-bottom: 1px solid #1e293b;
-    padding: 16px 24px;
+    padding: 8px 16px;
     display: flex;
     justify-content: space-between;
     align-items: center;
 }
 
 header h1 {
-    font-size: 20px;
+    font-size: 15px;
     color: #60a5fa;
     font-weight: 600;
 }
 
 #status-bar {
     display: flex;
-    gap: 24px;
-    font-size: 13px;
+    gap: 8px;
+    font-size: 11px;
 }
 
 #status-bar span {
-    padding: 4px 12px;
+    padding: 3px 8px;
     border-radius: 4px;
     background: #1e293b;
 }
 
 nav {
     background: #111827;
-    padding: 0 24px;
+    padding: 0 16px;
     display: flex;
-    gap: 4px;
+    gap: 2px;
     border-bottom: 1px solid #1e293b;
 }
 
@@ -50,9 +51,9 @@ nav {
     background: none;
     border: none;
     color: #94a3b8;
-    padding: 12px 20px;
+    padding: 8px 14px;
     cursor: pointer;
-    font-size: 14px;
+    font-size: 12px;
     border-bottom: 2px solid transparent;
     transition: all 0.2s;
 }
@@ -67,7 +68,7 @@ nav {
 }
 
 main {
-    padding: 24px;
+    padding: 14px;
     max-width: 1400px;
     margin: 0 auto;
 }
@@ -83,22 +84,22 @@ main {
 .grid {
     display: grid;
     grid-template-columns: 1fr 1fr;
-    gap: 20px;
+    gap: 12px;
 }
 
 .card {
     background: #111827;
     border: 1px solid #1e293b;
-    border-radius: 8px;
-    padding: 20px;
+    border-radius: 6px;
+    padding: 12px;
 }
 
 .card h3 {
-    font-size: 14px;
+    font-size: 11px;
     color: #94a3b8;
     text-transform: uppercase;
     letter-spacing: 0.5px;
-    margin-bottom: 16px;
+    margin-bottom: 10px;
 }
 
 .card.full-width {
@@ -108,22 +109,22 @@ main {
 table {
     width: 100%;
     border-collapse: collapse;
-    font-size: 13px;
+    font-size: 11px;
 }
 
 th {
     text-align: left;
-    padding: 10px 12px;
+    padding: 6px 8px;
     border-bottom: 1px solid #1e293b;
     color: #94a3b8;
     font-weight: 500;
     text-transform: uppercase;
-    font-size: 11px;
+    font-size: 10px;
     letter-spacing: 0.5px;
 }
 
 td {
-    padding: 10px 12px;
+    padding: 6px 8px;
     border-bottom: 1px solid #0f172a;
 }
 
@@ -137,9 +138,9 @@ tr:hover {
 
 .badge {
     display: inline-block;
-    padding: 2px 8px;
+    padding: 1px 6px;
     border-radius: 3px;
-    font-size: 11px;
+    font-size: 10px;
     font-weight: 600;
     text-transform: uppercase;
 }
@@ -157,26 +158,26 @@ tr:hover {
 .stat-row {
     display: flex;
     justify-content: space-between;
-    padding: 8px 0;
+    padding: 5px 0;
     border-bottom: 1px solid #1e293b;
 }
 
-.stat-label { color: #94a3b8; font-size: 13px; }
-.stat-value { font-weight: 600; font-size: 14px; }
+.stat-label { color: #94a3b8; font-size: 11px; }
+.stat-value { font-weight: 600; font-size: 12px; }
 
 .tf-buttons {
     display: flex;
-    gap: 6px;
-    margin-bottom: 12px;
+    gap: 4px;
+    margin-bottom: 10px;
 }
 
 .tf-btn {
     background: #1e293b;
     color: #94a3b8;
     border: 1px solid #334155;
-    padding: 8px 18px;
+    padding: 5px 12px;
     border-radius: 4px;
-    font-size: 13px;
+    font-size: 11px;
     font-weight: 600;
     cursor: pointer;
     transition: all 0.15s;
@@ -197,31 +198,31 @@ select {
     background: #1e293b;
     color: #e0e6ed;
     border: 1px solid #334155;
-    padding: 6px 12px;
+    padding: 4px 8px;
     border-radius: 4px;
-    font-size: 13px;
+    font-size: 11px;
 }
 
 .signal-card {
     background: #0f172a;
     border: 1px solid #1e293b;
     border-radius: 6px;
-    padding: 12px;
-    margin-bottom: 8px;
+    padding: 8px;
+    margin-bottom: 6px;
 }
 
 .signal-header {
     display: flex;
     justify-content: space-between;
-    margin-bottom: 8px;
+    margin-bottom: 6px;
 }
 
 .score-bar {
-    height: 4px;
+    height: 3px;
     background: #1e293b;
     border-radius: 2px;
     overflow: hidden;
-    margin-top: 8px;
+    margin-top: 6px;
 }
 
 .score-fill {
@@ -233,11 +234,11 @@ select {
 .compare-table {
     width: 100%;
     border-collapse: collapse;
-    font-size: 13px;
+    font-size: 11px;
 }
 .compare-table th {
     background: #1e293b;
-    padding: 8px 14px;
+    padding: 5px 10px;
     text-align: left;
     color: #94a3b8;
     font-weight: 600;
@@ -245,12 +246,28 @@ select {
     border-bottom: 1px solid #334155;
 }
 .compare-table td {
-    padding: 7px 14px;
+    padding: 5px 10px;
     border-bottom: 1px solid #0f172a;
     white-space: nowrap;
 }
 .compare-table tr:hover td { background: #0f172a; }
-.compare-metric { color: #94a3b8; font-size: 12px; }
+.compare-metric { color: #94a3b8; font-size: 11px; }
+
+.dl-xlsx-btn {
+    background: #1e293b;
+    border: 1px solid #334155;
+    color: #94a3b8;
+    border-radius: 4px;
+    padding: 3px 5px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    transition: all 0.15s;
+}
+.dl-xlsx-btn:hover {
+    background: #334155;
+    color: #e0e6ed;
+}
 
 @media (max-width: 768px) {
     .grid { grid-template-columns: 1fr; }

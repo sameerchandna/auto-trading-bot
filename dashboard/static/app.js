@@ -1,6 +1,50 @@
 // Trading Bot Dashboard - Client-side JS
 
 const API = '';
+let selectedPair = 'EURUSD';
+let assetRegistry = {};
+
+function priceDecimals() {
+    return (assetRegistry[selectedPair] || {}).price_decimals || 5;
+}
+
+// Load asset registry and build pair selector
+async function loadAssets() {
+    try {
+        const res = await fetch(`${API}/api/assets`);
+        const data = await res.json();
+        assetRegistry = data.assets;
+        selectedPair = data.default;
+
+        // Build pair selector if container exists
+        const container = document.getElementById('pair-selector');
+        if (container) {
+            let html = '';
+            for (const [name, spec] of Object.entries(data.assets)) {
+                if (!spec.active) continue;
+                const cls = name === selectedPair ? 'tf-btn active' : 'tf-btn';
+                html += `<button class="${cls}" data-pair="${name}">${name}</button>`;
+            }
+            container.innerHTML = html;
+
+            // Attach click handlers
+            container.querySelectorAll('[data-pair]').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    container.querySelectorAll('[data-pair]').forEach(b => b.classList.remove('active'));
+                    btn.classList.add('active');
+                    selectedPair = btn.dataset.pair;
+                    loadLivePrice();
+                    loadStatus();
+                    // Reload active tab data
+                    const activeTab = document.querySelector('.tab.active')?.dataset.tab;
+                    if (activeTab) loadTabData(activeTab);
+                });
+            });
+        }
+    } catch(e) {
+        console.error('Assets load failed:', e);
+    }
+}
 
 // Tab switching
 document.querySelectorAll('.tab').forEach(tab => {
@@ -24,17 +68,21 @@ function loadTabData(tab) {
         case 'backtest': loadBacktests(); break;
         case 'compare': loadComparisons(); break;
         case 'learning': loadLearning(); break;
+        case 'data': loadDataHealth(); break;
     }
 }
 
 // Live price ticker
 async function loadLivePrice() {
     try {
-        const res = await fetch(`${API}/api/price`);
+        const res = await fetch(`${API}/api/price?pair=${selectedPair}`);
         const data = await res.json();
         if (data.mid) {
-            document.getElementById('live-price').textContent = `EUR/USD: ${data.mid.toFixed(5)}`;
-            document.getElementById('live-price').title = `Bid: ${data.bid.toFixed(5)} | Ask: ${data.ask.toFixed(5)} | Spread: ${(data.spread*10000).toFixed(1)} pips`;
+            const asset = assetRegistry[selectedPair] || {};
+            const decimals = asset.price_decimals || 5;
+            const pipMult = 1 / (asset.pip_value || 0.0001);
+            document.getElementById('live-price').textContent = `${selectedPair}: ${data.mid.toFixed(decimals)}`;
+            document.getElementById('live-price').title = `Bid: ${data.bid.toFixed(decimals)} | Ask: ${data.ask.toFixed(decimals)} | Spread: ${(data.spread * pipMult).toFixed(1)} pips`;
         }
     } catch(e) {}
 }
@@ -42,7 +90,7 @@ async function loadLivePrice() {
 // Status bar
 async function loadStatus() {
     try {
-        const res = await fetch(`${API}/api/status`);
+        const res = await fetch(`${API}/api/status?pair=${selectedPair}`);
         const data = await res.json();
         document.getElementById('capital').textContent = `Capital: \u00a3${data.capital.toLocaleString()}`;
 
@@ -51,7 +99,8 @@ async function loadStatus() {
         pnlEl.className = data.total_pnl >= 0 ? 'positive' : 'negative';
 
         if (data.live_price) {
-            document.getElementById('live-price').textContent = `EUR/USD: ${data.live_price.toFixed(5)}`;
+            const decimals = (assetRegistry[selectedPair] || {}).price_decimals || 5;
+            document.getElementById('live-price').textContent = `${selectedPair}: ${data.live_price.toFixed(decimals)}`;
         }
 
         document.getElementById('open-pos').textContent = `Open: ${data.open_positions}`;
@@ -103,7 +152,7 @@ async function loadOverview() {
 
 async function loadEquityCurve() {
     try {
-        const res = await fetch(`${API}/api/equity`);
+        const res = await fetch(`${API}/api/equity?pair=${selectedPair}`);
         const data = await res.json();
 
         if (data.length < 2) {
@@ -135,7 +184,7 @@ async function loadEquityCurve() {
 
 async function loadRecentSignals() {
     try {
-        const res = await fetch(`${API}/api/signals?limit=5`);
+        const res = await fetch(`${API}/api/signals?limit=5&pair=${selectedPair}`);
         const signals = await res.json();
 
         if (!signals.length) {
@@ -154,7 +203,7 @@ async function loadRecentSignals() {
                         <span style="font-size:12px;color:#94a3b8">${s.signal_type}</span>
                     </div>
                     <div style="font-size:13px">
-                        Entry: ${s.entry_price.toFixed(5)} | SL: ${s.stop_loss.toFixed(5)} | TP: ${s.take_profit.toFixed(5)}
+                        Entry: ${s.entry_price.toFixed(priceDecimals())} | SL: ${s.stop_loss.toFixed(priceDecimals())} | TP: ${s.take_profit.toFixed(priceDecimals())}
                     </div>
                     <div class="score-bar">
                         <div class="score-fill" style="width:${s.confluence_score*100}%;background:${scoreColor}"></div>
@@ -172,7 +221,7 @@ async function loadRecentSignals() {
 
 async function loadOpenPositions() {
     try {
-        const res = await fetch(`${API}/api/trades?limit=10`);
+        const res = await fetch(`${API}/api/trades?limit=10&pair=${selectedPair}`);
         const trades = await res.json();
         const open = trades.filter(t => t.status === 'open');
 
@@ -191,10 +240,10 @@ async function loadOpenPositions() {
                         <span style="font-size:12px">Size: ${t.size.toLocaleString()}</span>
                     </div>
                     <div style="font-size:13px">
-                        Entry: ${t.entry_price.toFixed(5)} | SL: ${t.stop_loss?.toFixed(5) || '--'} | TP: ${t.take_profit?.toFixed(5) || '--'}
+                        Entry: ${t.entry_price.toFixed(priceDecimals())} | SL: ${t.stop_loss?.toFixed(priceDecimals()) || '--'} | TP: ${t.take_profit?.toFixed(priceDecimals()) || '--'}
                     </div>
                     <div style="font-size:11px;color:#94a3b8;margin-top:4px">
-                        Risk: \u00a3${t.size ? (t.size * 0.0001).toFixed(2) : '--'} | ${new Date(t.opened_at).toLocaleString()}
+                        Risk: \u00a3${t.risk_amount ? t.risk_amount.toFixed(2) : '--'} | ${new Date(t.opened_at).toLocaleString()}
                     </div>
                 </div>`;
         }
@@ -206,7 +255,7 @@ async function loadOpenPositions() {
 
 async function loadAccountSummary() {
     try {
-        const res = await fetch(`${API}/api/status`);
+        const res = await fetch(`${API}/api/status?pair=${selectedPair}`);
         const data = await res.json();
 
         const stats = [
@@ -241,7 +290,7 @@ function formatDuration(mins) {
 
 async function populateTradeFilter() {
     try {
-        const res = await fetch(`${API}/api/backtests`);
+        const res = await fetch(`${API}/api/backtests?pair=${selectedPair}`);
         const runs = await res.json();
         const sel = document.getElementById('trade-bt-filter');
         if (!sel) return;
@@ -269,10 +318,10 @@ async function loadTrades() {
 
         let url;
         if (!val || val === 'live') {
-            url = `${API}/api/trades?source=live`;
+            url = `${API}/api/trades?source=live&pair=${selectedPair}`;
         } else {
             const btId = val.replace('bt_', '');
-            url = `${API}/api/trades?bt_id=${btId}`;
+            url = `${API}/api/trades?bt_id=${btId}&pair=${selectedPair}`;
         }
         const res = await fetch(url);
         const trades = await res.json();
@@ -326,10 +375,10 @@ async function loadTrades() {
                 <td>${resultBadge}</td>
                 <td><span class="badge ${dirClass}">${t.direction}</span></td>
                 <td>${t.signal_type || '--'}</td>
-                <td>${t.entry_price.toFixed(5)}</td>
-                <td>${t.exit_price ? t.exit_price.toFixed(5) : '--'}</td>
-                <td>${t.stop_loss ? t.stop_loss.toFixed(5) : '--'}</td>
-                <td>${t.take_profit ? t.take_profit.toFixed(5) : '--'}</td>
+                <td>${t.entry_price.toFixed(priceDecimals())}</td>
+                <td>${t.exit_price ? t.exit_price.toFixed(priceDecimals()) : '--'}</td>
+                <td>${t.stop_loss ? t.stop_loss.toFixed(priceDecimals()) : '--'}</td>
+                <td>${t.take_profit ? t.take_profit.toFixed(priceDecimals()) : '--'}</td>
                 <td>${t.planned_rr != null ? t.planned_rr.toFixed(1) + ':1' : '--'}</td>
                 <td class="${pnlClass}">${t.actual_rr != null ? (t.actual_rr >= 0 ? '+' : '') + t.actual_rr.toFixed(2) + 'R' : '--'}</td>
                 <td class="${pnlClass}">${t.pnl_pips != null ? t.pnl_pips.toFixed(1) : '--'}</td>
@@ -366,7 +415,7 @@ document.querySelectorAll('.tf-btn').forEach(btn => {
 async function loadChart() {
     const tf = selectedTf;
     try {
-        const res = await fetch(`${API}/api/candles/${tf}?limit=200`);
+        const res = await fetch(`${API}/api/candles/${tf}?limit=200&pair=${selectedPair}`);
         const candles = await res.json();
 
         if (!candles.length) {
@@ -407,12 +456,16 @@ async function loadChart() {
 // Backtest tab
 async function loadBacktests() {
     try {
-        const res = await fetch(`${API}/api/backtests`);
+        const res = await fetch(`${API}/api/backtests?pair=${selectedPair}`);
         const runs = await res.json();
 
         let html = '';
         for (const r of runs) {
             const pnlClass = r.total_pnl >= 0 ? 'positive' : 'negative';
+            const longWr = r.long_trades ? ((r.long_wins / r.long_trades) * 100).toFixed(0) : '-';
+            const shortWr = r.short_trades ? ((r.short_wins / r.short_trades) * 100).toFixed(0) : '-';
+            const longPnlClass = r.long_pnl >= 0 ? 'positive' : 'negative';
+            const shortPnlClass = r.short_pnl >= 0 ? 'positive' : 'negative';
             html += `<tr>
                 <td>${r.id}</td>
                 <td>${new Date(r.timestamp).toLocaleDateString()}</td>
@@ -420,11 +473,13 @@ async function loadBacktests() {
                 <td>${r.total_trades}</td>
                 <td>${(r.win_rate * 100).toFixed(1)}%</td>
                 <td class="${pnlClass}">\u00a3${r.total_pnl.toFixed(2)}</td>
+                <td><span class="badge badge-long">${r.long_trades}</span> ${longWr}% <span class="${longPnlClass}">\u00a3${r.long_pnl.toFixed(0)}</span></td>
+                <td><span class="badge badge-short">${r.short_trades}</span> ${shortWr}% <span class="${shortPnlClass}">\u00a3${r.short_pnl.toFixed(0)}</span></td>
                 <td>${(r.max_drawdown * 100).toFixed(1)}%</td>
                 <td>${r.sharpe_ratio.toFixed(2)}</td>
             </tr>`;
         }
-        document.getElementById('backtest-body').innerHTML = html || '<tr><td colspan="8" class="neutral">No backtests yet. Run: python main.py backtest</td></tr>';
+        document.getElementById('backtest-body').innerHTML = html || '<tr><td colspan="10" class="neutral">No backtests yet. Run: python main.py backtest</td></tr>';
     } catch(e) {
         console.error('Backtests load failed:', e);
     }
@@ -448,7 +503,7 @@ const COMPARE_METRICS = [
 
 async function loadComparisons() {
     try {
-        const res = await fetch(`${API}/api/compare`);
+        const res = await fetch(`${API}/api/compare?pair=${selectedPair}`);
         const groups = await res.json();
 
         // Only show groups with a baseline AND at least one variant
@@ -478,44 +533,41 @@ async function loadComparisons() {
             }
             const variants = Object.values(seen);
 
-            let headerCols = '<th>Metric</th><th>Baseline</th>';
-            for (const v of variants) headerCols += `<th>${v.config}</th><th>Delta</th>`;
+            // Transposed: metrics as columns, runs as rows
+            let headerCols = '<th>Config</th>';
+            for (const m of COMPARE_METRICS) headerCols += `<th>${m.label}</th>`;
 
             let rows = '';
+
+            // Baseline row
+            let baselineRow = '<td class="compare-metric">Baseline</td>';
             for (const m of COMPARE_METRICS) {
                 const bVal = baseline[m.key] != null ? baseline[m.key] : 0;
-                let row = `<td class="compare-metric">${m.label}</td><td>${m.fmt(bVal)}</td>`;
+                baselineRow += `<td>${m.fmt(bVal)}</td>`;
+            }
+            rows += `<tr>${baselineRow}</tr>`;
 
-                for (const v of variants) {
-                    const vVal = v[m.key] != null ? v[m.key] : 0;
-                    const delta = vVal - bVal;
-                    const neutral = Math.abs(delta) < 0.0001;
-                    const improved = !neutral && (m.higherBetter ? delta > 0 : delta < 0);
-                    const cls = neutral ? '' : (improved ? 'positive' : 'negative');
-
-                    let dStr = '-';
-                    if (!neutral) {
-                        if (m.key === 'win_rate' || m.key === 'max_drawdown') {
-                            dStr = (delta >= 0 ? '+' : '') + (delta * 100).toFixed(1) + '%';
-                        } else if (m.key === 'total_pnl') {
-                            dStr = (delta >= 0 ? '+' : '') + '\u00a3' + Math.abs(delta).toFixed(0);
-                        } else if (Number.isInteger(bVal) && Number.isInteger(vVal)) {
-                            dStr = (delta >= 0 ? '+' : '') + delta;
-                        } else {
-                            dStr = (delta >= 0 ? '+' : '') + delta.toFixed(2);
-                        }
-                    }
-
-                    row += `<td class="${cls}">${m.fmt(vVal)}</td><td class="${cls}" style="font-size:12px">${dStr}</td>`;
+            for (const v of variants) {
+                let varRow = `<td class="compare-metric">${v.config}</td>`;
+                for (const m of COMPARE_METRICS) {
+                    varRow += `<td>${m.fmt(v[m.key] != null ? v[m.key] : 0)}</td>`;
                 }
-                rows += `<tr>${row}</tr>`;
+                rows += `<tr>${varRow}</tr>`;
             }
 
+            const groupIdx = comparable.indexOf(group);
             html += `
                 <div class="card full-width" style="margin-bottom:24px">
                     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
                         <h3 style="margin:0">${group.period}</h3>
-                        <span style="font-size:12px;color:#94a3b8">${variants.length} variant(s) vs baseline</span>
+                        <div style="display:flex;align-items:center;gap:12px">
+                            <span style="font-size:12px;color:#94a3b8">${variants.length} variant(s) vs baseline</span>
+                            <button class="dl-xlsx-btn" onclick="downloadCompareTable(${groupIdx})" title="Download as Excel">
+                                <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                                    <path d="M8 2v8M8 10l-3-3M8 10l3-3M3 13h10"/>
+                                </svg>
+                            </button>
+                        </div>
                     </div>
                     <div style="overflow-x:auto">
                     <table class="compare-table">
@@ -533,10 +585,43 @@ async function loadComparisons() {
     }
 }
 
+// Download comparison table as CSV (Excel-compatible)
+function downloadCompareTable(groupIdx) {
+    const tables = document.querySelectorAll('#compare-groups .compare-table');
+    if (!tables[groupIdx]) return;
+
+    const table = tables[groupIdx];
+    const rows = [];
+
+    // Header row
+    const headers = [];
+    table.querySelectorAll('thead th').forEach(th => headers.push(th.textContent.trim()));
+    rows.push(headers);
+
+    // Data rows (skip delta rows)
+    table.querySelectorAll('tbody tr').forEach(tr => {
+        const cells = [];
+        tr.querySelectorAll('td').forEach(td => cells.push(td.textContent.trim()));
+        rows.push(cells);
+    });
+
+    // Build CSV
+    const csv = rows.map(r => r.map(c => `"${c.replace(/"/g, '""')}"`).join(',')).join('\n');
+    const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    const card = tables[groupIdx].closest('.card');
+    const period = card ? card.querySelector('h3')?.textContent.trim().replace(/[^a-zA-Z0-9_-]/g, '_') : 'comparison';
+    a.href = url;
+    a.download = `comparison_${period}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+}
+
 // Learning tab
 async function loadLearning() {
     try {
-        const res = await fetch(`${API}/api/learning`);
+        const res = await fetch(`${API}/api/learning?pair=${selectedPair}`);
         const data = await res.json();
 
         // Setup stats
@@ -586,8 +671,57 @@ async function loadLearning() {
     }
 }
 
+// Data Health tab
+async function loadDataHealth() {
+    const btn = document.getElementById('data-refresh-btn');
+    if (btn) { btn.textContent = 'Loading...'; btn.disabled = true; }
+
+    try {
+        const res = await fetch(`${API}/api/data-health`);
+        const data = await res.json();
+
+        const tfs = ['15m', '1h', '4h', '1d', '1wk'];
+        let html = '';
+
+        for (const row of data.assets) {
+            const latestDates = tfs.map(tf => row.timeframes[tf]?.to).filter(Boolean);
+            const latest = latestDates.length ? latestDates.sort().at(-1) : '—';
+
+            let cells = `<td><strong>${row.asset}</strong></td><td style="color:#64748b">${row.asset_class}</td>`;
+
+            for (const tf of tfs) {
+                const tf_data = row.timeframes[tf];
+                if (!tf_data || !tf_data.count) {
+                    cells += `<td style="color:#ef4444">—</td><td style="color:#ef4444">—</td>`;
+                    continue;
+                }
+                const countOk = tf_data.count > 0;
+                const dateOk = tf_data.ok;
+                const countCls = countOk ? '' : 'style="color:#ef4444"';
+                const dateCls = dateOk ? '' : 'style="color:#f59e0b"';
+                cells += `<td ${countCls}>${tf_data.count.toLocaleString()}</td>`;
+                cells += `<td ${dateCls}>${tf_data.from || '—'}</td>`;
+            }
+
+            cells += `<td style="color:#94a3b8">${latest}</td>`;
+            html += `<tr>${cells}</tr>`;
+        }
+
+        document.getElementById('data-health-body').innerHTML = html || '<tr><td colspan="13" class="neutral">No data</td></tr>';
+
+        const ts = new Date(data.checked_at + 'Z').toLocaleTimeString();
+        const el = document.getElementById('data-checked-at');
+        if (el) el.textContent = `Last checked: ${ts}`;
+    } catch(e) {
+        console.error('Data health load failed:', e);
+        document.getElementById('data-health-body').innerHTML = '<tr><td colspan="13" class="neutral">Failed to load</td></tr>';
+    } finally {
+        if (btn) { btn.textContent = 'Refresh from DB'; btn.disabled = false; }
+    }
+}
+
 // Initial load
-loadOverview();
+loadAssets().then(() => loadOverview());
 
 // Live price refresh every 5 seconds
 setInterval(loadLivePrice, 5000);

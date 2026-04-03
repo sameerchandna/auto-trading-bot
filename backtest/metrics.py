@@ -32,10 +32,19 @@ def calculate_metrics(
             "worst_trade_pips": 0.0,
             "consecutive_wins": 0,
             "consecutive_losses": 0,
+            "long_trades": 0,
+            "long_wins": 0,
+            "long_pnl": 0,
+            "short_trades": 0,
+            "short_wins": 0,
+            "short_pnl": 0,
         }
 
+    from data.models import Direction
     wins = [t for t in trades if t.pnl > 0]
     losses = [t for t in trades if t.pnl <= 0]
+    longs = [t for t in trades if t.signal.direction == Direction.LONG]
+    shorts = [t for t in trades if t.signal.direction == Direction.SHORT]
 
     win_pips = [t.pnl_pips for t in wins]
     loss_pips = [abs(t.pnl_pips) for t in losses]
@@ -90,6 +99,12 @@ def calculate_metrics(
         "worst_trade_pips": round(min(all_pips), 1) if all_pips else 0,
         "consecutive_wins": max_consec_wins,
         "consecutive_losses": max_consec_losses,
+        "long_trades": len(longs),
+        "long_wins": sum(1 for t in longs if t.pnl > 0),
+        "long_pnl": round(sum(t.pnl for t in longs), 2),
+        "short_trades": len(shorts),
+        "short_wins": sum(1 for t in shorts if t.pnl > 0),
+        "short_pnl": round(sum(t.pnl for t in shorts), 2),
     }
 
 

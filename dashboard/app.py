@@ -8,6 +8,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
+from config.assets import ASSETS, ACTIVE_ASSETS, DEFAULT_ASSET, get_asset
 from config.settings import PAIR, PAIR_NAME, STARTING_CAPITAL, TIMEFRAMES
 from storage.database import (
     CandleRecord, PositionRecord, SignalRecord,
@@ -16,7 +17,7 @@ from storage.database import (
 
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title="EURUSD Trading Bot Dashboard")
+app = FastAPI(title="Auto Trading Bot Dashboard")
 
 STATIC_DIR = Path(__file__).parent / "static"
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
@@ -27,12 +28,32 @@ async def index():
     return (STATIC_DIR / "index.html").read_text()
 
 
+@app.get("/api/assets")
+async def list_assets():
+    """List available and active assets."""
+    return {
+        "assets": {
+            name: {
+                "name": spec.name,
+                "asset_class": spec.asset_class,
+                "pip_value": spec.pip_value,
+                "price_decimals": spec.price_decimals,
+                "active": name in ACTIVE_ASSETS,
+            }
+            for name, spec in ASSETS.items()
+        },
+        "active": ACTIVE_ASSETS,
+        "default": DEFAULT_ASSET,
+    }
+
+
 @app.get("/api/price")
-async def get_live_price():
-    """Get live EUR/USD price from OANDA."""
+async def get_live_price(pair: str = PAIR_NAME):
+    """Get live price from OANDA."""
     try:
         from data.ingestion import get_live_price
-        return get_live_price()
+        asset = get_asset(pair)
+        return get_live_price(pair=asset.yahoo_ticker)
     except Exception as e:
         return {"error": str(e)}
 
@@ -57,37 +78,45 @@ async def get_oanda_account():
 
 
 @app.get("/api/status")
-async def get_status():
+async def get_status(pair: str = ""):
     session = get_session()
     try:
-        open_positions = session.query(PositionRecord).filter_by(status="open").count()
-        closed_positions = session.query(PositionRecord).filter_by(status="closed").count()
-        total_pnl = sum(
-            r.pnl for r in session.query(PositionRecord)
-            .filter_by(status="closed")
-            .filter(~PositionRecord.tags.contains('"backtest"'))
-            .all()
-            if r.pnl
+        open_q = session.query(PositionRecord).filter_by(status="open")
+        closed_q = session.query(PositionRecord).filter_by(status="closed").filter(
+            ~PositionRecord.tags.contains('"backtest"')
         )
-        signals_today = session.query(SignalRecord).filter(
+        signals_q = session.query(SignalRecord).filter(
             SignalRecord.timestamp >= datetime.utcnow().replace(hour=0, minute=0)
-        ).count()
+        )
+
+        if pair:
+            open_q = open_q.filter_by(pair=pair)
+            closed_q = closed_q.filter_by(pair=pair)
+            signals_q = signals_q.filter_by(pair=pair)
+
+        open_positions = open_q.count()
+        closed_records = closed_q.all()
+        total_pnl = sum(r.pnl for r in closed_records if r.pnl)
+        signals_today = signals_q.count()
 
         # Get live price
         live_price = None
         try:
-            from data.ingestion import get_live_price
-            price_data = get_live_price()
+            from data.ingestion import get_live_price as _get_price
+            target = pair or DEFAULT_ASSET
+            asset = get_asset(target)
+            price_data = _get_price(pair=asset.yahoo_ticker)
             live_price = price_data.get("mid")
         except Exception:
             pass
 
         return {
-            "pair": PAIR_NAME,
+            "pair": pair or DEFAULT_ASSET,
+            "active_assets": ACTIVE_ASSETS,
             "capital": round(STARTING_CAPITAL + total_pnl, 2),
             "starting_capital": STARTING_CAPITAL,
             "open_positions": open_positions,
-            "closed_positions": closed_positions,
+            "closed_positions": len(closed_records),
             "total_pnl": round(total_pnl, 2),
             "signals_today": signals_today,
             "live_price": live_price,
@@ -97,7 +126,7 @@ async def get_status():
 
 
 @app.get("/api/trades")
-async def get_trades(limit: int = 2000, offset: int = 0, source: str = "live", bt_id: int = 0):
+async def get_trades(limit: int = 2000, offset: int = 0, source: str = "live", bt_id: int = 0, pair: str = ""):
     session = get_session()
     try:
         from storage.database import TradeJournalRecord
@@ -110,6 +139,9 @@ async def get_trades(limit: int = 2000, offset: int = 0, source: str = "live", b
         else:
             # live: exclude all backtest trades
             query = query.filter(~PositionRecord.tags.contains('"backtest"'))
+
+        if pair:
+            query = query.filter_by(pair=pair)
 
         trades = (
             query
@@ -163,6 +195,7 @@ async def get_trades(limit: int = 2000, offset: int = 0, source: str = "live", b
 
             result.append({
                 "id": t.id,
+                "pair": t.pair or DEFAULT_ASSET,
                 "direction": t.direction,
                 "status": t.status,
                 "entry_price": t.entry_price,
@@ -192,15 +225,13 @@ async def get_trades(limit: int = 2000, offset: int = 0, source: str = "live", b
 
 
 @app.get("/api/equity")
-async def get_equity():
+async def get_equity(pair: str = ""):
     session = get_session()
     try:
-        trades = (
-            session.query(PositionRecord)
-            .filter_by(status="closed")
-            .order_by(PositionRecord.closed_at.asc())
-            .all()
-        )
+        query = session.query(PositionRecord).filter_by(status="closed")
+        if pair:
+            query = query.filter_by(pair=pair)
+        trades = query.order_by(PositionRecord.closed_at.asc()).all()
         equity = STARTING_CAPITAL
         curve = [{"date": None, "equity": equity}]
 
@@ -218,12 +249,13 @@ async def get_equity():
 
 
 @app.get("/api/candles/{timeframe}")
-async def get_candles(timeframe: str, limit: int = 200):
+async def get_candles(timeframe: str, limit: int = 200, pair: str = PAIR_NAME):
+    asset = get_asset(pair)
     session = get_session()
     try:
         records = (
             session.query(CandleRecord)
-            .filter_by(pair=PAIR, timeframe=timeframe)
+            .filter_by(pair=asset.yahoo_ticker, timeframe=timeframe)
             .order_by(CandleRecord.timestamp.desc())
             .limit(limit)
             .all()
@@ -245,11 +277,14 @@ async def get_candles(timeframe: str, limit: int = 200):
 
 
 @app.get("/api/signals")
-async def get_signals(limit: int = 20):
+async def get_signals(limit: int = 20, pair: str = ""):
     session = get_session()
     try:
+        query = session.query(SignalRecord)
+        if pair:
+            query = query.filter_by(pair=pair)
         signals = (
-            session.query(SignalRecord)
+            query
             .order_by(SignalRecord.timestamp.desc())
             .limit(limit)
             .all()
@@ -273,11 +308,14 @@ async def get_signals(limit: int = 20):
 
 
 @app.get("/api/backtests")
-async def get_backtests():
+async def get_backtests(pair: str = ""):
     session = get_session()
     try:
+        query = session.query(BacktestRecord)
+        if pair:
+            query = query.filter_by(pair=pair)
         runs = (
-            session.query(BacktestRecord)
+            query
             .order_by(BacktestRecord.timestamp.desc())
             .limit(50)
             .all()
@@ -288,6 +326,7 @@ async def get_backtests():
             metrics = json.loads(r.results_json) if r.results_json else {}
             result.append({
                 "id": r.id,
+                "pair": r.pair or DEFAULT_ASSET,
                 "timestamp": r.timestamp.isoformat(),
                 "start_date": r.start_date.isoformat(),
                 "end_date": r.end_date.isoformat(),
@@ -305,6 +344,12 @@ async def get_backtests():
                 "avg_loss_pips": metrics.get("avg_loss_pips", 0),
                 "consecutive_losses": metrics.get("consecutive_losses", 0),
                 "sortino_ratio": metrics.get("sortino_ratio", 0),
+                "long_trades": metrics.get("long_trades", 0),
+                "long_wins": metrics.get("long_wins", 0),
+                "long_pnl": metrics.get("long_pnl", 0),
+                "short_trades": metrics.get("short_trades", 0),
+                "short_wins": metrics.get("short_wins", 0),
+                "short_pnl": metrics.get("short_pnl", 0),
             })
         return result
     finally:
@@ -312,15 +357,14 @@ async def get_backtests():
 
 
 @app.get("/api/compare")
-async def get_comparisons():
+async def get_comparisons(pair: str = ""):
     """Group backtest runs into baseline/variant pairs for comparison view."""
     session = get_session()
     try:
-        runs = (
-            session.query(BacktestRecord)
-            .order_by(BacktestRecord.timestamp.asc())
-            .all()
-        )
+        query = session.query(BacktestRecord)
+        if pair:
+            query = query.filter_by(pair=pair)
+        runs = query.order_by(BacktestRecord.timestamp.asc()).all()
 
         # Group by (start_date, end_date) — runs on the same period can be compared
         from collections import defaultdict
@@ -356,8 +400,45 @@ async def get_comparisons():
         session.close()
 
 
+@app.get("/api/data-health")
+async def get_data_health():
+    """Return candle counts and date ranges for all assets/timeframes."""
+    import sqlite3
+    from config.settings import HISTORY_START
+    from config.assets import ASSETS
+
+    db_path = Path(__file__).parent.parent / "storage" / "trading.db"
+    conn = sqlite3.connect(str(db_path))
+    cur = conn.cursor()
+
+    timeframes = ["15m", "1h", "4h", "1d", "1wk"]
+    result = []
+
+    for name, spec in ASSETS.items():
+        pair = spec.yahoo_ticker
+        row = {"asset": name, "asset_class": spec.asset_class, "timeframes": {}}
+        for tf in timeframes:
+            cur.execute(
+                "SELECT COUNT(*), MIN(timestamp), MAX(timestamp) FROM candles WHERE pair=? AND timeframe=?",
+                (pair, tf),
+            )
+            cnt, mn, mx = cur.fetchone()
+            expected_start = HISTORY_START[tf].strftime("%Y-%m-%d")
+            row["timeframes"][tf] = {
+                "count": cnt or 0,
+                "from": str(mn)[:10] if mn else None,
+                "to": str(mx)[:10] if mx else None,
+                "expected_from": expected_start,
+                "ok": bool(mn and str(mn)[:10] <= expected_start),
+            }
+        result.append(row)
+
+    conn.close()
+    return {"assets": result, "checked_at": datetime.utcnow().isoformat()}
+
+
 @app.get("/api/learning")
-async def get_learning():
+async def get_learning(pair: str = ""):
     session = get_session()
     try:
         params = (
@@ -368,7 +449,10 @@ async def get_learning():
         )
 
         # Setup stats from closed trades
-        trades = session.query(PositionRecord).filter_by(status="closed").all()
+        trades_q = session.query(PositionRecord).filter_by(status="closed")
+        if pair:
+            trades_q = trades_q.filter_by(pair=pair)
+        trades = trades_q.all()
         stats = {}
         for t in trades:
             st = t.signal_type or "unknown"

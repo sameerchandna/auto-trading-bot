@@ -12,17 +12,19 @@ show_sr         = input.bool(true, "Show S/R Zones", group="Display")
 show_signals    = input.bool(true, "Show Entry Signals", group="Display")
 show_wave       = input.bool(true, "Show Wave Phase", group="Display")
 show_htf        = input.bool(true, "Show HTF Bias Background", group="Display")
+show_d_waves    = input.bool(true, "Show Daily Wave Lines", group="Display")
+show_w_waves    = input.bool(true, "Show Weekly Wave Lines", group="Display")
 
 // Confluence weights (optimized params from bot)
 w_htf_bias      = input.float(0.334, "HTF Bias Weight", step=0.01, group="Confluence")
 w_bos           = input.float(0.102, "BOS Weight", step=0.01, group="Confluence")
 w_wave          = input.float(0.154, "Wave Position Weight", step=0.01, group="Confluence")
 w_liquidity     = input.float(0.193, "Liquidity Sweep Weight", step=0.01, group="Confluence")
-w_sr            = input.float(0.160, "S/R Reaction Weight", step=0.01, group="Confluence")
+w_sr            = input.float(0.16, "S/R Reaction Weight", step=0.01, group="Confluence")
 w_wave_end      = input.float(0.057, "Wave Ending Weight", step=0.01, group="Confluence")
-confluence_thr  = input.float(0.30, "Confluence Threshold", step=0.05, group="Confluence")
+confluence_thr  = input.float(0.45, "Confluence Threshold", step=0.05, group="Confluence")
 
-sl_atr_mult     = input.float(1.0, "SL ATR Multiplier", step=0.1, group="Risk")
+sl_atr_mult     = input.float(1.5, "SL ATR Multiplier", step=0.1, group="Risk")
 tp_rr           = input.float(2.0, "TP Risk:Reward", step=0.5, group="Risk")
 atr_period      = input.int(14, "ATR Period", group="Risk")
 
@@ -33,6 +35,8 @@ col_bos         = color.new(#60a5fa, 0)
 col_choch       = color.new(#fbbf24, 0)
 col_sr_support  = color.new(#34d399, 80)
 col_sr_resist   = color.new(#f87171, 80)
+col_d_wave      = color.new(#60a5fa, 0)   // Daily wave lines - blue
+col_w_wave      = color.new(#a855f7, 0)   // Weekly wave lines - purple
 
 // ============================================
 // MTF FUNCTIONS (var-free for request.security)
@@ -88,14 +92,144 @@ f_mtf_sr(_lb) =>
     [ta.valuewhen(not na(ph), ph, 0), ta.valuewhen(not na(pl), pl, 0)]
 
 // ============================================
-// HTF BIAS: Daily + Weekly
-// Matches bot's PriceContext.get_htf_bias()
+// HTF BIAS: Daily + Weekly (scored individually)
+// Matches bot's split scoring in confluence.py
 // ============================================
 daily_bias  = request.security(syminfo.tickerid, "D", f_mtf_bias(swing_lookback))
 weekly_bias = request.security(syminfo.tickerid, "W", f_mtf_bias(swing_lookback))
 
-// If both align use that, else prefer weekly, else daily
-htf_bias = daily_bias == weekly_bias ? daily_bias : weekly_bias != 0 ? weekly_bias : daily_bias
+// Combined bias for background coloring only
+htf_bias = daily_bias == weekly_bias ? daily_bias : daily_bias != 0 and weekly_bias == 0 ? daily_bias : weekly_bias != 0 and daily_bias == 0 ? weekly_bias : 0
+
+// ============================================
+// DAILY & WEEKLY WAVE ZIGZAG
+// Fetches last 3 swing H + 3 swing L per TF,
+// sorts by time, draws a single zigzag line
+// with HH/HL/LH/LL labels at each swing
+// ============================================
+
+// Return last 3 swing highs & lows with timestamps (not bar_index)
+f_mtf_swings(_lb) =>
+    ph = ta.pivothigh(high, _lb, _lb)
+    pl = ta.pivotlow(low, _lb, _lb)
+    sh0 = ta.valuewhen(not na(ph), ph, 0)
+    sh1 = ta.valuewhen(not na(ph), ph, 1)
+    sh2 = ta.valuewhen(not na(ph), ph, 2)
+    sl0 = ta.valuewhen(not na(pl), pl, 0)
+    sl1 = ta.valuewhen(not na(pl), pl, 1)
+    sl2 = ta.valuewhen(not na(pl), pl, 2)
+    sh0t = ta.valuewhen(not na(ph), time[_lb], 0)
+    sh1t = ta.valuewhen(not na(ph), time[_lb], 1)
+    sh2t = ta.valuewhen(not na(ph), time[_lb], 2)
+    sl0t = ta.valuewhen(not na(pl), time[_lb], 0)
+    sl1t = ta.valuewhen(not na(pl), time[_lb], 1)
+    sl2t = ta.valuewhen(not na(pl), time[_lb], 2)
+    [sh0, sh1, sh2, sl0, sl1, sl2, sh0t, sh1t, sh2t, sl0t, sl1t, sl2t]
+
+// Fetch daily swings
+[d_sh0, d_sh1, d_sh2, d_sl0, d_sl1, d_sl2, d_sh0t, d_sh1t, d_sh2t, d_sl0t, d_sl1t, d_sl2t] = request.security(syminfo.tickerid, "D", f_mtf_swings(swing_lookback))
+
+// Fetch weekly swings
+[w_sh0, w_sh1, w_sh2, w_sl0, w_sl1, w_sl2, w_sh0t, w_sh1t, w_sh2t, w_sl0t, w_sl1t, w_sl2t] = request.security(syminfo.tickerid, "W", f_mtf_swings(swing_lookback))
+
+// Persistent line/label arrays for cleanup
+var line[]  d_zz_lines  = array.new_line(0)
+var label[] d_zz_labels = array.new_label(0)
+var line[]  w_zz_lines  = array.new_line(0)
+var label[] w_zz_labels = array.new_label(0)
+
+// Draw a zigzag: collect 6 points, sort by time, connect
+f_draw_zigzag(sh0, sh1, sh2, sl0, sl1, sl2, sh0t, sh1t, sh2t, sl0t, sl1t, sl2t, col, w, prefix) =>
+    var int[]   zt = array.new_int(0)
+    var float[] zp = array.new_float(0)
+    var int[]   zd = array.new_int(0)   // 1=high, -1=low (for labels)
+    var float[] zprev = array.new_float(0)  // previous swing of same type (for HH/HL etc)
+    array.clear(zt)
+    array.clear(zp)
+    array.clear(zd)
+    array.clear(zprev)
+
+    // Add valid points: highs
+    if not na(sh0) and not na(sh0t)
+        array.push(zt, int(sh0t)), array.push(zp, sh0), array.push(zd, 1), array.push(zprev, nz(sh1))
+    if not na(sh1) and not na(sh1t)
+        array.push(zt, int(sh1t)), array.push(zp, sh1), array.push(zd, 1), array.push(zprev, nz(sh2))
+    if not na(sh2) and not na(sh2t)
+        array.push(zt, int(sh2t)), array.push(zp, sh2), array.push(zd, 1), array.push(zprev, na)
+    // Lows
+    if not na(sl0) and not na(sl0t)
+        array.push(zt, int(sl0t)), array.push(zp, sl0), array.push(zd, -1), array.push(zprev, nz(sl1))
+    if not na(sl1) and not na(sl1t)
+        array.push(zt, int(sl1t)), array.push(zp, sl1), array.push(zd, -1), array.push(zprev, nz(sl2))
+    if not na(sl2) and not na(sl2t)
+        array.push(zt, int(sl2t)), array.push(zp, sl2), array.push(zd, -1), array.push(zprev, na)
+
+    // Bubble sort by time (ascending)
+    sz = array.size(zt)
+    var line[]  out_lines  = array.new_line(0)
+    var label[] out_labels = array.new_label(0)
+    array.clear(out_lines)
+    array.clear(out_labels)
+
+    if sz >= 2
+        for i = 0 to sz - 2
+            for j = 0 to sz - i - 2
+                if array.get(zt, j) > array.get(zt, j + 1)
+                    // Swap all parallel arrays
+                    tt = array.get(zt, j),   array.set(zt, j, array.get(zt, j+1)),     array.set(zt, j+1, tt)
+                    tp = array.get(zp, j),   array.set(zp, j, array.get(zp, j+1)),     array.set(zp, j+1, tp)
+                    td = array.get(zd, j),   array.set(zd, j, array.get(zd, j+1)),     array.set(zd, j+1, td)
+                    tv = array.get(zprev, j), array.set(zprev, j, array.get(zprev, j+1)), array.set(zprev, j+1, tv)
+
+        // Draw zigzag lines
+        for i = 0 to sz - 2
+            array.push(out_lines, line.new(
+                 array.get(zt, i), array.get(zp, i),
+                 array.get(zt, i+1), array.get(zp, i+1),
+                 xloc=xloc.bar_time, color=col, width=w))
+
+        // Draw labels at each point
+        for i = 0 to sz - 1
+            d = array.get(zd, i)
+            p = array.get(zp, i)
+            pv = array.get(zprev, i)
+            lbl_txt = d == 1 ? (not na(pv) and pv != 0 ? (p > pv ? prefix + ":HH" : prefix + ":LH") : prefix + ":H") : (not na(pv) and pv != 0 ? (p > pv ? prefix + ":HL" : prefix + ":LL") : prefix + ":L")
+            sty = d == 1 ? label.style_label_down : label.style_label_up
+            array.push(out_labels, label.new(array.get(zt, i), p, lbl_txt, xloc=xloc.bar_time, style=sty, color=color.new(col, 70), textcolor=col, size=size.tiny))
+
+    [out_lines, out_labels]
+
+if barstate.islast
+    // Clean previous daily
+    if array.size(d_zz_lines) > 0
+        for i = 0 to array.size(d_zz_lines) - 1
+            line.delete(array.get(d_zz_lines, i))
+    if array.size(d_zz_labels) > 0
+        for i = 0 to array.size(d_zz_labels) - 1
+            label.delete(array.get(d_zz_labels, i))
+    array.clear(d_zz_lines)
+    array.clear(d_zz_labels)
+    // Clean previous weekly
+    if array.size(w_zz_lines) > 0
+        for i = 0 to array.size(w_zz_lines) - 1
+            line.delete(array.get(w_zz_lines, i))
+    if array.size(w_zz_labels) > 0
+        for i = 0 to array.size(w_zz_labels) - 1
+            label.delete(array.get(w_zz_labels, i))
+    array.clear(w_zz_lines)
+    array.clear(w_zz_labels)
+
+    // Draw daily zigzag (blue, width 2)
+    if show_d_waves
+        [dl, dlb] = f_draw_zigzag(d_sh0, d_sh1, d_sh2, d_sl0, d_sl1, d_sl2, d_sh0t, d_sh1t, d_sh2t, d_sl0t, d_sl1t, d_sl2t, col_d_wave, 2, "D")
+        d_zz_lines  := dl
+        d_zz_labels := dlb
+
+    // Draw weekly zigzag (purple, width 3)
+    if show_w_waves
+        [wl, wlb] = f_draw_zigzag(w_sh0, w_sh1, w_sh2, w_sl0, w_sl1, w_sl2, w_sh0t, w_sh1t, w_sh2t, w_sl0t, w_sl1t, w_sl2t, col_w_wave, 3, "W")
+        w_zz_lines  := wl
+        w_zz_labels := wlb
 
 // ============================================
 // 4H STRUCTURE & WAVE
@@ -188,7 +322,7 @@ if new_choch_bear
 bos_choch_col = show_bos ? ((new_choch_bull or new_choch_bear) ? col_choch : (new_bos_bull or new_bos_bear) ? col_bos : na) : na
 
 // ============================================
-// BIAS BACKGROUND (HTF bias from Daily+Weekly)
+// BIAS BACKGROUND (combined HTF for visual only)
 // ============================================
 bg_col = show_htf ? (htf_bias == 1 ? color.new(#34d399, 95) : htf_bias == -1 ? color.new(#f87171, 95) : color.new(#94a3b8, 97)) : na
 bgcolor(bg_col)
@@ -251,8 +385,8 @@ atr_val = ta.atr(atr_period)
 
 // --- LONG SCORING ---
 
-// 1. HTF Bias (Daily + Weekly) — weight 0.334
-htf_long = htf_bias == 1 ? 1.0 : htf_bias == 0 ? 0.3 : 0.0
+// 1. HTF Bias (Daily + Weekly scored individually) — weight 0.334
+htf_long = daily_bias == 1 and weekly_bias == 1 ? 1.0 : daily_bias == 1 and weekly_bias == 0 ? 0.8 : daily_bias == 0 and weekly_bias == 1 ? 0.7 : daily_bias == 1 and weekly_bias == -1 ? 0.5 : daily_bias == 0 and weekly_bias == 0 ? 0.3 : daily_bias == -1 and weekly_bias == 0 ? 0.1 : 0.0
 
 // 2. BOS: best of 4H and chart TF — weight 0.102
 //    BOS with aligned bias = 1.0, CHoCH = 0.6
@@ -281,7 +415,8 @@ long_score = htf_long * w_htf_bias + bos_long * w_bos + wave_long * w_wave + liq
 
 // --- SHORT SCORING ---
 
-htf_short = htf_bias == -1 ? 1.0 : htf_bias == 0 ? 0.3 : 0.0
+// 1. HTF Bias (Daily + Weekly scored individually) — weight 0.334
+htf_short = daily_bias == -1 and weekly_bias == -1 ? 1.0 : daily_bias == -1 and weekly_bias == 0 ? 0.8 : daily_bias == 0 and weekly_bias == -1 ? 0.7 : daily_bias == -1 and weekly_bias == 1 ? 0.5 : daily_bias == 0 and weekly_bias == 0 ? 0.3 : daily_bias == 1 and weekly_bias == 0 ? 0.1 : 0.0
 
 bos_short_4h = h4_break_state == 1 and h4_bias == -1 ? 1.0 : h4_break_state == -1 ? 0.6 : 0.0
 bos_short_1h = chart_last_break == 1 and chart_bias == -1 ? 1.0 : chart_last_break == -1 ? 0.6 : 0.0
@@ -395,70 +530,129 @@ if short_entry
 
 // Entry markers + position boxes
 if long_entry
-    score_pct = str.tostring(long_score * 100, "#.#")
     sl_pips = str.tostring((trade_entry - trade_sl) / syminfo.mintick, "#.#")
     tp_pips = str.tostring((trade_tp - trade_entry) / syminfo.mintick, "#.#")
-    htf_txt = htf_bias == 1 ? "BULL" : htf_bias == -1 ? "BEAR" : "RANGE"
+    d_txt = daily_bias == 1 ? "BULL" : daily_bias == -1 ? "BEAR" : "RANGE"
+    w_txt = weekly_bias == 1 ? "BULL" : weekly_bias == -1 ? "BEAR" : "RANGE"
     h4_txt = h4_bias == 1 ? "BULL" : h4_bias == -1 ? "BEAR" : "RANGE"
-    tip = "LONG" + "\nEntry: " + str.tostring(trade_entry, "#.#####") + "\nSL: " + str.tostring(trade_sl, "#.#####") + " (" + sl_pips + " pips)" + "\nTP: " + str.tostring(trade_tp, "#.#####") + " (" + tp_pips + " pips)" + "\nR:R 1:" + str.tostring(tp_rr, "#.#") + "\nScore: " + score_pct + "%" + "\nHTF(D+W): " + htf_txt + " | 4H: " + h4_txt + " | Wave: " + wave_phase
+    tip = "LONG  Score: " + str.tostring(long_score * 100, "#.#") + "%" + "\n─── Trade ───" + "\nEntry: " + str.tostring(trade_entry, "#.#####") + "\nSL: " + str.tostring(trade_sl, "#.#####") + " (" + sl_pips + "p)" + "\nTP: " + str.tostring(trade_tp, "#.#####") + " (" + tp_pips + "p)  R:R 1:" + str.tostring(tp_rr, "#.#") + "\n─── Structure ───" + "\nWeekly: " + w_txt + "  Daily: " + d_txt + "\n4H: " + h4_txt + (h4_break_state == 1 ? " BOS" : h4_break_state == -1 ? " CHoCH" : "") + "  1H: " + (chart_bias == 1 ? "BULL" : chart_bias == -1 ? "BEAR" : "RANGE") + (chart_last_break == 1 ? " BOS" : chart_last_break == -1 ? " CHoCH" : "") + "\nWave: " + wave_phase + "  RSI: " + str.tostring(rsi_val, "#.#") + "\n─── Factors ───" + "\nHTF Bias: " + str.tostring(htf_long * 100, "#") + "% (wt " + str.tostring(w_htf_bias * 100, "#") + "%)" + "\nBOS: " + str.tostring(bos_long * 100, "#") + "% | Wave: " + str.tostring(wave_long * 100, "#") + "%" + "\nLiquidity: " + str.tostring(liq_long * 100, "#") + "% | S/R: " + str.tostring(sr_long * 100, "#") + "%" + "\nExhaustion: " + str.tostring(end_long * 100, "#") + "%"
     entry_label := label.new(bar_index, low, "▲", style=label.style_none, textcolor=#fbbf24, size=size.normal, tooltip=tip)
     tp_box := box.new(bar_index, trade_tp, bar_index + 50, trade_entry, border_color=color.new(#34d399, 60), bgcolor=color.new(#34d399, 90), border_width=1)
     sl_box := box.new(bar_index, trade_entry, bar_index + 50, trade_sl, border_color=color.new(#f87171, 60), bgcolor=color.new(#f87171, 90), border_width=1)
     entry_line := line.new(bar_index, trade_entry, bar_index + 50, trade_entry, color=color.new(#94a3b8, 40), style=line.style_dashed, width=1)
 
 if short_entry
-    score_pct = str.tostring(short_score * 100, "#.#")
     sl_pips = str.tostring((trade_sl - trade_entry) / syminfo.mintick, "#.#")
     tp_pips = str.tostring((trade_entry - trade_tp) / syminfo.mintick, "#.#")
-    htf_txt = htf_bias == 1 ? "BULL" : htf_bias == -1 ? "BEAR" : "RANGE"
+    d_txt = daily_bias == 1 ? "BULL" : daily_bias == -1 ? "BEAR" : "RANGE"
+    w_txt = weekly_bias == 1 ? "BULL" : weekly_bias == -1 ? "BEAR" : "RANGE"
     h4_txt = h4_bias == 1 ? "BULL" : h4_bias == -1 ? "BEAR" : "RANGE"
-    tip = "SHORT" + "\nEntry: " + str.tostring(trade_entry, "#.#####") + "\nSL: " + str.tostring(trade_sl, "#.#####") + " (" + sl_pips + " pips)" + "\nTP: " + str.tostring(trade_tp, "#.#####") + " (" + tp_pips + " pips)" + "\nR:R 1:" + str.tostring(tp_rr, "#.#") + "\nScore: " + score_pct + "%" + "\nHTF(D+W): " + htf_txt + " | 4H: " + h4_txt + " | Wave: " + wave_phase
+    tip = "SHORT  Score: " + str.tostring(short_score * 100, "#.#") + "%" + "\n─── Trade ───" + "\nEntry: " + str.tostring(trade_entry, "#.#####") + "\nSL: " + str.tostring(trade_sl, "#.#####") + " (" + sl_pips + "p)" + "\nTP: " + str.tostring(trade_tp, "#.#####") + " (" + tp_pips + "p)  R:R 1:" + str.tostring(tp_rr, "#.#") + "\n─── Structure ───" + "\nWeekly: " + w_txt + "  Daily: " + d_txt + "\n4H: " + h4_txt + (h4_break_state == 1 ? " BOS" : h4_break_state == -1 ? " CHoCH" : "") + "  1H: " + (chart_bias == 1 ? "BULL" : chart_bias == -1 ? "BEAR" : "RANGE") + (chart_last_break == 1 ? " BOS" : chart_last_break == -1 ? " CHoCH" : "") + "\nWave: " + wave_phase + "  RSI: " + str.tostring(rsi_val, "#.#") + "\n─── Factors ───" + "\nHTF Bias: " + str.tostring(htf_short * 100, "#") + "% (wt " + str.tostring(w_htf_bias * 100, "#") + "%)" + "\nBOS: " + str.tostring(bos_short * 100, "#") + "% | Wave: " + str.tostring(wave_short * 100, "#") + "%" + "\nLiquidity: " + str.tostring(liq_short * 100, "#") + "% | S/R: " + str.tostring(sr_short * 100, "#") + "%" + "\nExhaustion: " + str.tostring(end_short * 100, "#") + "%"
     entry_label := label.new(bar_index, high, "▼", style=label.style_none, textcolor=#fbbf24, size=size.normal, tooltip=tip)
     tp_box := box.new(bar_index, trade_entry, bar_index + 50, trade_tp, border_color=color.new(#34d399, 60), bgcolor=color.new(#34d399, 90), border_width=1)
     sl_box := box.new(bar_index, trade_sl, bar_index + 50, trade_entry, border_color=color.new(#f87171, 60), bgcolor=color.new(#f87171, 90), border_width=1)
     entry_line := line.new(bar_index, trade_entry, bar_index + 50, trade_entry, color=color.new(#94a3b8, 40), style=line.style_dashed, width=1)
 
 // ============================================
-// INFO TABLE
+// INFO TABLE — Full confluence breakdown
 // ============================================
-var table info = table.new(position.top_right, 2, 9, bgcolor=color.new(#111827, 10), border_width=1, border_color=color.new(#1e293b, 0))
+var table info = table.new(position.top_right, 4, 14, bgcolor=color.new(#111827, 10), border_width=1, border_color=color.new(#1e293b, 0))
+
+f_bias_txt(b) => b == 1 ? "BULL" : b == -1 ? "BEAR" : "RANGE"
+f_bias_col(b) => b == 1 ? col_bull : b == -1 ? col_bear : color.gray
+f_score_bar(v) => str.tostring(v * 100, "#") + "%"
+f_score_col(v) => v >= 0.8 ? col_bull : v >= 0.5 ? #fbbf24 : v > 0 ? #f97316 : color.gray
 
 if barstate.islast
-    htf_txt = htf_bias == 1 ? "BULLISH" : htf_bias == -1 ? "BEARISH" : "RANGING"
-    htf_col = htf_bias == 1 ? col_bull : htf_bias == -1 ? col_bear : color.gray
-    table.cell(info, 0, 0, "HTF Bias", text_color=color.gray, text_size=size.small)
-    table.cell(info, 1, 0, htf_txt, text_color=htf_col, text_size=size.small)
+    // Header
+    table.cell(info, 0, 0, "STRUCTURE", text_color=color.white, text_size=size.small, text_halign=text.align_left)
+    table.cell(info, 1, 0, "", text_size=size.small)
+    table.cell(info, 2, 0, "", text_size=size.small)
+    table.cell(info, 3, 0, "", text_size=size.small)
 
-    d_txt = daily_bias == 1 ? "BULL" : daily_bias == -1 ? "BEAR" : "RANGE"
-    w_txt = weekly_bias == 1 ? "BULL" : weekly_bias == -1 ? "BEAR" : "RANGE"
-    table.cell(info, 0, 1, "D / W", text_color=color.gray, text_size=size.small)
-    table.cell(info, 1, 1, d_txt + " / " + w_txt, text_color=color.white, text_size=size.small)
+    // Weekly bias
+    table.cell(info, 0, 1, "Weekly", text_color=color.gray, text_size=size.small)
+    table.cell(info, 1, 1, f_bias_txt(weekly_bias), text_color=f_bias_col(weekly_bias), text_size=size.small)
+    table.cell(info, 2, 1, "", text_size=size.small)
+    table.cell(info, 3, 1, "", text_size=size.small)
 
-    h4_bias_txt = h4_bias == 1 ? "BULL" : h4_bias == -1 ? "BEAR" : "RANGE"
+    // Daily bias
+    table.cell(info, 0, 2, "Daily", text_color=color.gray, text_size=size.small)
+    table.cell(info, 1, 2, f_bias_txt(daily_bias), text_color=f_bias_col(daily_bias), text_size=size.small)
+    table.cell(info, 2, 2, "", text_size=size.small)
+    table.cell(info, 3, 2, "", text_size=size.small)
+
+    // 4H bias + break
     h4_brk_txt = h4_break_state == 1 ? " BOS" : h4_break_state == -1 ? " CHoCH" : ""
-    table.cell(info, 0, 2, "4H", text_color=color.gray, text_size=size.small)
-    table.cell(info, 1, 2, h4_bias_txt + h4_brk_txt, text_color=h4_bias == 1 ? col_bull : h4_bias == -1 ? col_bear : color.gray, text_size=size.small)
+    table.cell(info, 0, 3, "4H", text_color=color.gray, text_size=size.small)
+    table.cell(info, 1, 3, f_bias_txt(h4_bias) + h4_brk_txt, text_color=f_bias_col(h4_bias), text_size=size.small)
+    table.cell(info, 2, 3, "", text_size=size.small)
+    table.cell(info, 3, 3, "", text_size=size.small)
 
-    ct_txt = chart_bias == 1 ? "BULL" : chart_bias == -1 ? "BEAR" : "RANGE"
+    // 1H bias + break
     ct_brk_txt = chart_last_break == 1 ? " BOS" : chart_last_break == -1 ? " CHoCH" : ""
-    table.cell(info, 0, 3, "Chart", text_color=color.gray, text_size=size.small)
-    table.cell(info, 1, 3, ct_txt + ct_brk_txt, text_color=chart_bias == 1 ? col_bull : chart_bias == -1 ? col_bear : color.gray, text_size=size.small)
+    table.cell(info, 0, 4, "1H", text_color=color.gray, text_size=size.small)
+    table.cell(info, 1, 4, f_bias_txt(chart_bias) + ct_brk_txt, text_color=f_bias_col(chart_bias), text_size=size.small)
+    table.cell(info, 2, 4, "", text_size=size.small)
+    table.cell(info, 3, 4, "", text_size=size.small)
 
-    table.cell(info, 0, 4, "Wave", text_color=color.gray, text_size=size.small)
-    table.cell(info, 1, 4, wave_phase, text_color=is_impulse ? col_bos : color.gray, text_size=size.small)
-
-    table.cell(info, 0, 5, "ATR", text_color=color.gray, text_size=size.small)
-    table.cell(info, 1, 5, str.tostring(atr_val, "#.#####"), text_color=color.white, text_size=size.small)
-
+    // Wave + RSI + ATR row
+    table.cell(info, 0, 5, "Wave", text_color=color.gray, text_size=size.small)
+    table.cell(info, 1, 5, wave_phase + " (" + str.tostring(efficiency * 100, "#") + "%)", text_color=is_impulse ? col_bos : color.gray, text_size=size.small)
     rsi_col = rsi_ob ? col_bear : rsi_os ? col_bull : color.white
-    table.cell(info, 0, 6, "RSI", text_color=color.gray, text_size=size.small)
-    table.cell(info, 1, 6, str.tostring(rsi_val, "#.#"), text_color=rsi_col, text_size=size.small)
+    table.cell(info, 2, 5, "RSI " + str.tostring(rsi_val, "#.#"), text_color=rsi_col, text_size=size.small)
+    table.cell(info, 3, 5, "ATR " + str.tostring(atr_val * 10000, "#.#") + "p", text_color=color.white, text_size=size.small)
 
-    table.cell(info, 0, 7, "Long Score", text_color=color.gray, text_size=size.small)
-    table.cell(info, 1, 7, str.tostring(long_score * 100, "#") + "%", text_color=long_score >= confluence_thr ? col_bull : color.gray, text_size=size.small)
+    // Separator
+    table.cell(info, 0, 6, "CONFLUENCE", text_color=color.white, text_size=size.small, text_halign=text.align_left)
+    table.cell(info, 1, 6, "Long", text_color=col_bull, text_size=size.small)
+    table.cell(info, 2, 6, "Short", text_color=col_bear, text_size=size.small)
+    table.cell(info, 3, 6, "Wt", text_color=color.gray, text_size=size.small)
 
-    table.cell(info, 0, 8, "Short Score", text_color=color.gray, text_size=size.small)
-    table.cell(info, 1, 8, str.tostring(short_score * 100, "#") + "%", text_color=short_score >= confluence_thr ? col_bear : color.gray, text_size=size.small)
+    // HTF Bias breakdown
+    table.cell(info, 0, 7, "HTF Bias", text_color=color.gray, text_size=size.small)
+    table.cell(info, 1, 7, f_score_bar(htf_long), text_color=f_score_col(htf_long), text_size=size.small)
+    table.cell(info, 2, 7, f_score_bar(htf_short), text_color=f_score_col(htf_short), text_size=size.small)
+    table.cell(info, 3, 7, str.tostring(w_htf_bias * 100, "#") + "%", text_color=color.gray, text_size=size.small)
+
+    // BOS
+    table.cell(info, 0, 8, "BOS", text_color=color.gray, text_size=size.small)
+    table.cell(info, 1, 8, f_score_bar(bos_long), text_color=f_score_col(bos_long), text_size=size.small)
+    table.cell(info, 2, 8, f_score_bar(bos_short), text_color=f_score_col(bos_short), text_size=size.small)
+    table.cell(info, 3, 8, str.tostring(w_bos * 100, "#") + "%", text_color=color.gray, text_size=size.small)
+
+    // Wave
+    table.cell(info, 0, 9, "Wave Pos", text_color=color.gray, text_size=size.small)
+    table.cell(info, 1, 9, f_score_bar(wave_long), text_color=f_score_col(wave_long), text_size=size.small)
+    table.cell(info, 2, 9, f_score_bar(wave_short), text_color=f_score_col(wave_short), text_size=size.small)
+    table.cell(info, 3, 9, str.tostring(w_wave * 100, "#") + "%", text_color=color.gray, text_size=size.small)
+
+    // Liquidity
+    table.cell(info, 0, 10, "Liquidity", text_color=color.gray, text_size=size.small)
+    table.cell(info, 1, 10, f_score_bar(liq_long), text_color=f_score_col(liq_long), text_size=size.small)
+    table.cell(info, 2, 10, f_score_bar(liq_short), text_color=f_score_col(liq_short), text_size=size.small)
+    table.cell(info, 3, 10, str.tostring(w_liquidity * 100, "#") + "%", text_color=color.gray, text_size=size.small)
+
+    // S/R
+    table.cell(info, 0, 11, "S/R", text_color=color.gray, text_size=size.small)
+    table.cell(info, 1, 11, f_score_bar(sr_long), text_color=f_score_col(sr_long), text_size=size.small)
+    table.cell(info, 2, 11, f_score_bar(sr_short), text_color=f_score_col(sr_short), text_size=size.small)
+    table.cell(info, 3, 11, str.tostring(w_sr * 100, "#") + "%", text_color=color.gray, text_size=size.small)
+
+    // Wave ending
+    table.cell(info, 0, 12, "Exhaustion", text_color=color.gray, text_size=size.small)
+    table.cell(info, 1, 12, f_score_bar(end_long), text_color=f_score_col(end_long), text_size=size.small)
+    table.cell(info, 2, 12, f_score_bar(end_short), text_color=f_score_col(end_short), text_size=size.small)
+    table.cell(info, 3, 12, str.tostring(w_wave_end * 100, "#") + "%", text_color=color.gray, text_size=size.small)
+
+    // Total scores
+    long_pct = str.tostring(long_score * 100, "#.#") + "%"
+    short_pct = str.tostring(short_score * 100, "#.#") + "%"
+    thr_pct = str.tostring(confluence_thr * 100, "#") + "%"
+    table.cell(info, 0, 13, "TOTAL (>" + thr_pct + ")", text_color=color.white, text_size=size.small)
+    table.cell(info, 1, 13, long_pct, text_color=long_score >= confluence_thr ? col_bull : color.gray, text_size=size.small)
+    table.cell(info, 2, 13, short_pct, text_color=short_score >= confluence_thr ? col_bear : color.gray, text_size=size.small)
+    table.cell(info, 3, 13, "", text_size=size.small)
 
 // ============================================
 // ALERTS

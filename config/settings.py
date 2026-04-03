@@ -77,13 +77,14 @@ PARAM_BOUNDS = {
     "wave_ending_weight": (0.0, 0.15),
 }
 
-# Data fetching
-MAX_HISTORY_DAYS = {
-    "15m": 59,      # Yahoo limit for intraday
-    "1h": 729,
-    "4h": 729,
-    "1d": 3650,     # ~10 years
-    "1wk": 3650,
+# Data fetching — always OANDA, fixed start dates matched to EURUSD history depth
+from datetime import datetime
+HISTORY_START = {
+    "15m": datetime(2023, 1, 1),
+    "1h":  datetime(2023, 1, 1),
+    "4h":  datetime(2016, 4, 4),
+    "1d":  datetime(2016, 4, 4),
+    "1wk": datetime(2016, 4, 1),
 }
 
 # Learning

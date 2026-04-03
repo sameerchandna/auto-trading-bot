@@ -8,18 +8,24 @@
     "wave_ending": 0.0572,
     "catalyst": 0.0
   },
-  "threshold": 0.30,
-  "sl_multiplier": 1.0,
+  "threshold": 0.45,
+  "sl_multiplier": 1.5,
   "tp_risk_reward": 2.0,
   "swing_lookback": 6,
   "backtest_results": {
-    "period": "2025-01-01 to 2025-12-31",
-    "total_trades": 49,
-    "win_rate": 0.47,
-    "expectancy_pips": 7.7,
-    "total_pnl_gbp": 7574,
-    "max_drawdown_pct": 0.049,
-    "profit_factor": 1.61,
-    "optimizer_trials": "29/30 profitable"
+    "period": "2023-01-01 to 2026-04-02",
+    "config": "no-overlap, block-h[17,18,19,20]",
+    "bt_id": 22,
+    "total_trades": 561,
+    "wins": 240,
+    "losses": 321,
+    "win_rate": 0.428,
+    "profit_factor": 1.45,
+    "total_pnl_gbp": 31608.09,
+    "max_drawdown_pct": 0.317,
+    "sharpe_ratio": -0.00,
+    "expectancy_pips": 4.0,
+    "avg_win_pips": 30.2,
+    "avg_loss_pips": 15.7
   }
 }

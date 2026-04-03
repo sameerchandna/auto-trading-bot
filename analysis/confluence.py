@@ -10,7 +10,7 @@ from analysis.support_resistance import price_at_zone, find_nearest_sr
 from analysis.wave_endings import is_wave_exhausted
 from config.settings import (
     CONFLUENCE_WEIGHTS, CONFLUENCE_THRESHOLD,
-    SL_ATR_MULTIPLIER, TP_RISK_REWARD, PAIR_NAME,
+    SL_ATR_MULTIPLIER, TP_RISK_REWARD,
 )
 
 logger = logging.getLogger(__name__)
@@ -19,6 +19,9 @@ logger = logging.getLogger(__name__)
 def score_confluence(
     context: PriceContext,
     weights: dict[str, float] | None = None,
+    threshold: float | None = None,
+    sl_atr_mult: float | None = None,
+    tp_rr: float | None = None,
 ) -> list[Signal]:
     """Score all possible setups and return signals that meet threshold.
 
@@ -27,6 +30,12 @@ def score_confluence(
     """
     if weights is None:
         weights = CONFLUENCE_WEIGHTS
+    if threshold is None:
+        threshold = CONFLUENCE_THRESHOLD
+    if sl_atr_mult is None:
+        sl_atr_mult = SL_ATR_MULTIPLIER
+    if tp_rr is None:
+        tp_rr = TP_RISK_REWARD
 
     signals = []
 
@@ -50,18 +59,20 @@ def score_confluence(
 
     # Evaluate LONG setup
     long_score = _score_direction(context, Direction.LONG, weights)
-    if long_score >= CONFLUENCE_THRESHOLD:
+    if long_score >= threshold:
         signal = _build_signal(
-            context, Direction.LONG, long_score, entry_tf.atr, entry_tf_name
+            context, Direction.LONG, long_score, entry_tf.atr, entry_tf_name,
+            sl_atr_mult=sl_atr_mult, tp_rr=tp_rr,
         )
         if signal:
             signals.append(signal)
 
     # Evaluate SHORT setup
     short_score = _score_direction(context, Direction.SHORT, weights)
-    if short_score >= CONFLUENCE_THRESHOLD:
+    if short_score >= threshold:
         signal = _build_signal(
-            context, Direction.SHORT, short_score, entry_tf.atr, entry_tf_name
+            context, Direction.SHORT, short_score, entry_tf.atr, entry_tf_name,
+            sl_atr_mult=sl_atr_mult, tp_rr=tp_rr,
         )
         if signal:
             signals.append(signal)
@@ -79,14 +90,26 @@ def _score_direction(
     target_bias = Bias.BULLISH if direction == Direction.LONG else Bias.BEARISH
     target_wave = WavePhase.CORRECTION_DOWN if direction == Direction.LONG else WavePhase.CORRECTION_UP
 
-    # 1. HTF Bias alignment
-    htf_bias = context.get_htf_bias()
-    if htf_bias == target_bias:
-        scores["htf_bias"] = 1.0
-    elif htf_bias == Bias.RANGING:
-        scores["htf_bias"] = 0.3
+    # 1. HTF Bias alignment (score daily + weekly individually)
+    daily = context.analyses.get("1d")
+    weekly = context.analyses.get("1wk")
+    d_bias = daily.structure.bias if daily else Bias.RANGING
+    w_bias = weekly.structure.bias if weekly else Bias.RANGING
+
+    if d_bias == target_bias and w_bias == target_bias:
+        scores["htf_bias"] = 1.0   # Full agreement
+    elif d_bias == target_bias and w_bias == Bias.RANGING:
+        scores["htf_bias"] = 0.8   # Daily leading, weekly not opposing
+    elif d_bias == Bias.RANGING and w_bias == target_bias:
+        scores["htf_bias"] = 0.7   # Weekly confirms, daily undecided
+    elif d_bias == target_bias and w_bias != target_bias:
+        scores["htf_bias"] = 0.5   # Daily leads but weekly opposes — possible reversal
+    elif d_bias == Bias.RANGING and w_bias == Bias.RANGING:
+        scores["htf_bias"] = 0.3   # No directional info
+    elif d_bias != target_bias and w_bias == Bias.RANGING:
+        scores["htf_bias"] = 0.1   # Daily opposes, weekly neutral
     else:
-        scores["htf_bias"] = 0.0
+        scores["htf_bias"] = 0.0   # Both oppose or weekly opposes with no daily support
 
     # 2. Break of Structure
     bos_score = 0.0
@@ -177,6 +200,8 @@ def _build_signal(
     confluence_score: float,
     atr: float,
     entry_tf_name: str = "15m",
+    sl_atr_mult: float = SL_ATR_MULTIPLIER,
+    tp_rr: float = TP_RISK_REWARD,
 ) -> Signal | None:
     """Build a trade signal with entry, SL, and TP."""
     entry_tf = context.analyses.get(entry_tf_name)
@@ -186,20 +211,20 @@ def _build_signal(
     current_price = entry_tf.current_price
 
     if direction == Direction.LONG:
-        stop_loss = round(current_price - atr * SL_ATR_MULTIPLIER, 5)
+        stop_loss = round(current_price - atr * sl_atr_mult, 5)
         risk = current_price - stop_loss
-        take_profit = round(current_price + risk * TP_RISK_REWARD, 5)
+        take_profit = round(current_price + risk * tp_rr, 5)
     else:
-        stop_loss = round(current_price + atr * SL_ATR_MULTIPLIER, 5)
+        stop_loss = round(current_price + atr * sl_atr_mult, 5)
         risk = stop_loss - current_price
-        take_profit = round(current_price - risk * TP_RISK_REWARD, 5)
+        take_profit = round(current_price - risk * tp_rr, 5)
 
     # Determine signal type based on what scored highest
     signal_type = SignalType.BOS_CONTINUATION  # Default
 
     return Signal(
         timestamp=datetime.utcnow(),
-        pair=PAIR_NAME,
+        pair=context.pair,
         direction=direction,
         signal_type=signal_type,
         entry_price=current_price,
