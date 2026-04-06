@@ -46,6 +46,7 @@ BLOCK_HOURS_UTC = [17, 18, 19, 20]  # Skip signals during these UTC hours (low-q
 
 # Learnable parameters (defaults - adjusted by optimizer)
 CONFLUENCE_THRESHOLD = 0.60       # Minimum score to generate signal
+SIGNAL_DOMINANCE_MARGIN = 0.10    # Winning direction must outscore loser by this much
 SWING_LOOKBACK = 5                # Bars for swing point detection
 ATR_PERIOD = 14                   # ATR for volatility measurement
 SL_ATR_MULTIPLIER = 1.5          # Stop loss = entry +/- ATR * multiplier

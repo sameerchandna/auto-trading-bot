@@ -9,7 +9,7 @@ from data.models import (
 from analysis.support_resistance import price_at_zone, find_nearest_sr
 from analysis.wave_endings import is_wave_exhausted
 from config.settings import (
-    CONFLUENCE_WEIGHTS, CONFLUENCE_THRESHOLD,
+    CONFLUENCE_WEIGHTS, CONFLUENCE_THRESHOLD, SIGNAL_DOMINANCE_MARGIN,
     SL_ATR_MULTIPLIER, TP_RISK_REWARD,
 )
 
@@ -20,6 +20,7 @@ def score_confluence(
     context: PriceContext,
     weights: dict[str, float] | None = None,
     threshold: float | None = None,
+    dominance_margin: float | None = None,
     sl_atr_mult: float | None = None,
     tp_rr: float | None = None,
 ) -> list[Signal]:
@@ -32,6 +33,8 @@ def score_confluence(
         weights = CONFLUENCE_WEIGHTS
     if threshold is None:
         threshold = CONFLUENCE_THRESHOLD
+    if dominance_margin is None:
+        dominance_margin = SIGNAL_DOMINANCE_MARGIN
     if sl_atr_mult is None:
         sl_atr_mult = SL_ATR_MULTIPLIER
     if tp_rr is None:
@@ -57,21 +60,18 @@ def score_confluence(
     if current_price == 0:
         return signals
 
-    # Evaluate LONG setup
     long_score = _score_direction(context, Direction.LONG, weights)
-    if long_score >= threshold:
-        signal = _build_signal(
-            context, Direction.LONG, long_score, entry_tf.atr, entry_tf_name,
-            sl_atr_mult=sl_atr_mult, tp_rr=tp_rr,
-        )
-        if signal:
-            signals.append(signal)
-
-    # Evaluate SHORT setup
     short_score = _score_direction(context, Direction.SHORT, weights)
-    if short_score >= threshold:
+
+    best_score = max(long_score, short_score)
+    worst_score = min(long_score, short_score)
+
+    # Only emit a signal if best clears threshold AND dominates the other direction.
+    # If both are high (contested), emit nothing — market is ambiguous.
+    if best_score >= threshold and (best_score - worst_score) >= dominance_margin:
+        direction = Direction.LONG if long_score > short_score else Direction.SHORT
         signal = _build_signal(
-            context, Direction.SHORT, short_score, entry_tf.atr, entry_tf_name,
+            context, direction, best_score, entry_tf.atr, entry_tf_name,
             sl_atr_mult=sl_atr_mult, tp_rr=tp_rr,
         )
         if signal:
