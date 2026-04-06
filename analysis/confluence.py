@@ -60,8 +60,8 @@ def score_confluence(
     if current_price == 0:
         return signals
 
-    long_score = _score_direction(context, Direction.LONG, weights)
-    short_score = _score_direction(context, Direction.SHORT, weights)
+    long_score, long_trigger_tf, long_scores = _score_direction(context, Direction.LONG, weights)
+    short_score, short_trigger_tf, short_scores = _score_direction(context, Direction.SHORT, weights)
 
     best_score = max(long_score, short_score)
     worst_score = min(long_score, short_score)
@@ -70,8 +70,11 @@ def score_confluence(
     # If both are high (contested), emit nothing — market is ambiguous.
     if best_score >= threshold and (best_score - worst_score) >= dominance_margin:
         direction = Direction.LONG if long_score > short_score else Direction.SHORT
+        winning_scores = long_scores if long_score > short_score else short_scores
+        winning_trigger_tf = long_trigger_tf if long_score > short_score else short_trigger_tf
         signal = _build_signal(
             context, direction, best_score, entry_tf.atr, entry_tf_name,
+            trigger_tf=winning_trigger_tf, scores=winning_scores,
             sl_atr_mult=sl_atr_mult, tp_rr=tp_rr,
         )
         if signal:
@@ -80,13 +83,25 @@ def score_confluence(
     return signals
 
 
+def _derive_signal_type(scores: dict) -> SignalType:
+    """Derive signal type from which factor scored highest."""
+    if scores.get("liquidity_sweep", 0) >= 1.0:
+        return SignalType.LIQUIDITY_SWEEP
+    if scores.get("bos", 0) >= 1.0:
+        return SignalType.BOS_CONTINUATION
+    if scores.get("wave_ending", 0) >= 0.8:
+        return SignalType.WAVE_ENDING
+    return SignalType.BOS_CONTINUATION
+
+
 def _score_direction(
     context: PriceContext,
     direction: Direction,
     weights: dict[str, float],
-) -> float:
-    """Score a specific direction (long or short)."""
+) -> tuple[float, str, dict]:
+    """Score a specific direction. Returns (score, trigger_timeframe, scores)."""
     scores = {}
+    trigger_tf = "4h"  # default
     target_bias = Bias.BULLISH if direction == Direction.LONG else Bias.BEARISH
     target_wave = WavePhase.CORRECTION_DOWN if direction == Direction.LONG else WavePhase.CORRECTION_UP
 
@@ -118,10 +133,14 @@ def _score_direction(
             analysis = context.analyses[tf]
             if analysis.structure.last_break == StructureBreak.BOS:
                 if analysis.structure.bias == target_bias:
-                    bos_score = max(bos_score, 1.0)
+                    if 1.0 > bos_score:
+                        bos_score = 1.0
+                        trigger_tf = tf
             elif analysis.structure.last_break == StructureBreak.CHOCH:
                 # CHoCH in our direction = potential reversal entry
-                bos_score = max(bos_score, 0.6)
+                if 0.6 > bos_score:
+                    bos_score = 0.6
+                    trigger_tf = tf
     scores["bos"] = bos_score
 
     # 3. Wave position (want to enter during correction)
@@ -137,14 +156,17 @@ def _score_direction(
                     wave_score = max(wave_score, 0.6)
     scores["wave_position"] = wave_score
 
-    # 4. Liquidity sweep
+    # 4. Liquidity sweep (overrides BOS as trigger TF when present)
     sweep_score = 0.0
     for tf in ["15m", "1h"]:
         if tf in context.analyses:
             for sweep in context.analyses[tf].liquidity_sweeps:
                 if sweep.confirmed and sweep.direction == direction:
                     sweep_score = 1.0
+                    trigger_tf = tf
                     break
+        if sweep_score == 1.0:
+            break
     scores["liquidity_sweep"] = sweep_score
 
     # 5. S/R reaction
@@ -184,14 +206,13 @@ def _score_direction(
     total = sum(scores.get(k, 0) * weights.get(k, 0) for k in weights)
 
     logger.debug(
-        f"{direction.value} confluence: {total:.2f} "
+        f"{direction.value} confluence: {total:.2f} trigger={trigger_tf} "
         f"(htf={scores['htf_bias']:.1f} bos={scores['bos']:.1f} "
         f"wave={scores['wave_position']:.1f} liq={scores['liquidity_sweep']:.1f} "
-        f"sr={scores['sr_reaction']:.1f} cat={scores['catalyst']:.1f} "
-        f"end={scores['wave_ending']:.1f})"
+        f"sr={scores['sr_reaction']:.1f} end={scores['wave_ending']:.1f})"
     )
 
-    return total
+    return total, trigger_tf, scores
 
 
 def _build_signal(
@@ -200,6 +221,8 @@ def _build_signal(
     confluence_score: float,
     atr: float,
     entry_tf_name: str = "15m",
+    trigger_tf: str = "4h",
+    scores: dict | None = None,
     sl_atr_mult: float = SL_ATR_MULTIPLIER,
     tp_rr: float = TP_RISK_REWARD,
 ) -> Signal | None:
@@ -219,8 +242,7 @@ def _build_signal(
         risk = stop_loss - current_price
         take_profit = round(current_price - risk * tp_rr, 5)
 
-    # Determine signal type based on what scored highest
-    signal_type = SignalType.BOS_CONTINUATION  # Default
+    signal_type = _derive_signal_type(scores or {})
 
     return Signal(
         timestamp=datetime.utcnow(),
@@ -236,5 +258,5 @@ def _build_signal(
             "bias_strength": context.bias_strength,
         },
         entry_timeframe=entry_tf_name,
-        trigger_timeframe="4h",
+        trigger_timeframe=trigger_tf,
     )

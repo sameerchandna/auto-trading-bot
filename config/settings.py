@@ -59,7 +59,7 @@ CONFLUENCE_WEIGHTS = {
     "wave_position": 0.15,       # Trading with impulse
     "liquidity_sweep": 0.15,     # Key level swept
     "sr_reaction": 0.10,         # At significant S/R level
-    "catalyst": 0.10,            # News supports direction
+    "catalyst": 0.0,             # Disabled until news feed is implemented
     "wave_ending": 0.05,         # Wave exhaustion signal
 }
 
