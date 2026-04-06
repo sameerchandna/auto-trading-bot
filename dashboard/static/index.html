@@ -113,11 +113,15 @@
         <!-- Backtests -->
         <section id="backtest" class="tab-content">
             <div class="card full-width">
-                <h3>Backtest Results</h3>
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+                    <h3 style="margin:0">Backtest Results</h3>
+                    <span id="bt-pair-filter" style="display:inline-flex;gap:4px"></span>
+                </div>
                 <table id="backtest-table">
                     <thead>
                         <tr>
                             <th>#</th>
+                            <th>Pair</th>
                             <th>Date</th>
                             <th>Period</th>
                             <th>Trades</th>

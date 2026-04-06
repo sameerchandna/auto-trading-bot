@@ -375,6 +375,7 @@ async def get_comparisons(pair: str = ""):
             period = f"{r.start_date.date()} to {r.end_date.date()}"
             groups[period].append({
                 "id": r.id,
+                "pair": r.pair or DEFAULT_ASSET,
                 "timestamp": r.timestamp.isoformat(),
                 "config": params.get("config", "baseline"),
                 "total_trades": r.total_trades,

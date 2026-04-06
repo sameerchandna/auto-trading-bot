@@ -3,6 +3,9 @@
 const API = '';
 let selectedPair = 'EURUSD';
 let assetRegistry = {};
+let btPairFilter = '';  // '' = All pairs for Backtests tab
+
+const fmtPnl = v => '\u00a3' + Math.round(+v).toLocaleString('en-GB');
 
 function priceDecimals() {
     return (assetRegistry[selectedPair] || {}).price_decimals || 5;
@@ -351,7 +354,7 @@ async function loadTrades() {
                 WR: <strong>${winRate}%</strong> |
                 Avg RR: <strong>${avgRR >= 0 ? '+' : ''}${avgRR.toFixed(2)}R</strong>
                 (W: +${avgWinRR.toFixed(2)}R / L: ${avgLossRR.toFixed(2)}R) |
-                P&L: <span class="${pnlClass}"><strong>\u00a3${totalPnl.toFixed(2)}</strong></span>`;
+                P&L: <span class="${pnlClass}"><strong>${fmtPnl(totalPnl)}</strong></span>`;
         }
 
         let html = '';
@@ -382,7 +385,7 @@ async function loadTrades() {
                 <td>${t.planned_rr != null ? t.planned_rr.toFixed(1) + ':1' : '--'}</td>
                 <td class="${pnlClass}">${t.actual_rr != null ? (t.actual_rr >= 0 ? '+' : '') + t.actual_rr.toFixed(2) + 'R' : '--'}</td>
                 <td class="${pnlClass}">${t.pnl_pips != null ? t.pnl_pips.toFixed(1) : '--'}</td>
-                <td class="${pnlClass}">${t.pnl != null ? '\u00a3' + t.pnl.toFixed(2) : '--'}</td>
+                <td class="${pnlClass}">${t.pnl != null ? fmtPnl(t.pnl) : '--'}</td>
                 <td>${t.risk_amount ? '\u00a3' + t.risk_amount.toFixed(2) : '--'}</td>
                 <td>${t.confluence_score ? (t.confluence_score * 100).toFixed(0) + '%' : '--'}</td>
                 <td>${formatDuration(t.duration_mins)}</td>
@@ -453,10 +456,32 @@ async function loadChart() {
     }
 }
 
-// Backtest tab
+// Backtest tab — local pair filter (independent of global selectedPair)
+function initBtPairFilter() {
+    const container = document.getElementById('bt-pair-filter');
+    if (!container || container.dataset.built) return;
+    container.dataset.built = '1';
+
+    const pairs = Object.keys(assetRegistry).filter(k => assetRegistry[k].active);
+    let html = `<button class="tf-btn${btPairFilter === '' ? ' active' : ''}" data-btpair="">All</button>`;
+    for (const p of pairs) {
+        html += `<button class="tf-btn${btPairFilter === p ? ' active' : ''}" data-btpair="${p}">${p}</button>`;
+    }
+    container.innerHTML = html;
+    container.querySelectorAll('[data-btpair]').forEach(btn => {
+        btn.addEventListener('click', () => {
+            container.querySelectorAll('[data-btpair]').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            btPairFilter = btn.dataset.btpair;
+            loadBacktests();
+        });
+    });
+}
+
 async function loadBacktests() {
+    initBtPairFilter();
     try {
-        const res = await fetch(`${API}/api/backtests?pair=${selectedPair}`);
+        const res = await fetch(`${API}/api/backtests?pair=${btPairFilter}`);
         const runs = await res.json();
 
         let html = '';
@@ -468,18 +493,19 @@ async function loadBacktests() {
             const shortPnlClass = r.short_pnl >= 0 ? 'positive' : 'negative';
             html += `<tr>
                 <td>${r.id}</td>
+                <td>${r.pair}</td>
                 <td>${new Date(r.timestamp).toLocaleDateString()}</td>
                 <td>${new Date(r.start_date).toLocaleDateString()} - ${new Date(r.end_date).toLocaleDateString()}</td>
                 <td>${r.total_trades}</td>
                 <td>${(r.win_rate * 100).toFixed(1)}%</td>
-                <td class="${pnlClass}">\u00a3${r.total_pnl.toFixed(2)}</td>
-                <td><span class="badge badge-long">${r.long_trades}</span> ${longWr}% <span class="${longPnlClass}">\u00a3${r.long_pnl.toFixed(0)}</span></td>
-                <td><span class="badge badge-short">${r.short_trades}</span> ${shortWr}% <span class="${shortPnlClass}">\u00a3${r.short_pnl.toFixed(0)}</span></td>
+                <td class="${pnlClass}">${fmtPnl(r.total_pnl)}</td>
+                <td><span class="badge badge-long">${r.long_trades}</span> ${longWr}% <span class="${longPnlClass}">${fmtPnl(r.long_pnl)}</span></td>
+                <td><span class="badge badge-short">${r.short_trades}</span> ${shortWr}% <span class="${shortPnlClass}">${fmtPnl(r.short_pnl)}</span></td>
                 <td>${(r.max_drawdown * 100).toFixed(1)}%</td>
                 <td>${r.sharpe_ratio.toFixed(2)}</td>
             </tr>`;
         }
-        document.getElementById('backtest-body').innerHTML = html || '<tr><td colspan="10" class="neutral">No backtests yet. Run: python main.py backtest</td></tr>';
+        document.getElementById('backtest-body').innerHTML = html || '<tr><td colspan="11" class="neutral">No backtests yet. Run: python main.py backtest</td></tr>';
     } catch(e) {
         console.error('Backtests load failed:', e);
     }
@@ -493,7 +519,7 @@ const COMPARE_METRICS = [
     { key: 'losses',             label: 'Losses',            fmt: v => +v,                                higherBetter: false  },
     { key: 'win_rate',           label: 'Win Rate',          fmt: v => ((+v)*100).toFixed(1)+'%',         higherBetter: true   },
     { key: 'profit_factor',      label: 'Profit Factor',     fmt: v => isFinite(+v) ? (+v).toFixed(2) : 'N/A', higherBetter: true },
-    { key: 'total_pnl',          label: 'Total P&L',         fmt: v => '\u00a3'+(+v).toFixed(0),          higherBetter: true   },
+    { key: 'total_pnl',          label: 'Total P&L',         fmt: v => fmtPnl(v),                         higherBetter: true   },
     { key: 'expectancy_pips',    label: 'Expectancy (pips)', fmt: v => ((+v)>=0?'+':'')+(+v).toFixed(1),  higherBetter: true   },
     { key: 'max_drawdown',       label: 'Max Drawdown',      fmt: v => ((+v)*100).toFixed(1)+'%',         higherBetter: false  },
     { key: 'sharpe_ratio',       label: 'Sharpe Ratio',      fmt: v => isFinite(+v) ? (+v).toFixed(2) : 'N/A', higherBetter: true },
@@ -504,66 +530,72 @@ const COMPARE_METRICS = [
 
 async function loadComparisons() {
     try {
-        const res = await fetch(`${API}/api/compare?pair=${selectedPair}`);
+        // Fetch all pairs so the comparisons view is always cross-pair
+        const res = await fetch(`${API}/api/compare`);
         const groups = await res.json();
 
-        // Only show groups with a baseline AND at least one variant
-        const comparable = groups.filter(g =>
-            g.runs.some(r => r.config === 'baseline') &&
-            g.runs.some(r => r.config !== 'baseline')
-        );
+        // Re-group by (pair, period) — the API groups only by period, so split further
+        const byPairPeriod = {};
+        for (const g of groups) {
+            for (const r of g.runs) {
+                const key = `${r.pair || 'EURUSD'} | ${g.period}`;
+                if (!byPairPeriod[key]) byPairPeriod[key] = { pair: r.pair || 'EURUSD', period: g.period, runs: [] };
+                byPairPeriod[key].runs.push(r);
+            }
+        }
+
+        // Only show groups with ≥2 runs — oldest run acts as the reference
+        const comparable = Object.values(byPairPeriod)
+            .filter(g => g.runs.length >= 2)
+            .sort((a, b) => a.pair.localeCompare(b.pair) || a.period.localeCompare(b.period));
 
         if (!comparable.length) {
-            document.getElementById('compare-groups').innerHTML = '<div class="card"><p class="neutral">No comparisons yet. Run: python main.py compare --no-overlap</p></div>';
+            document.getElementById('compare-groups').innerHTML = '<div class="card"><p class="neutral">No comparisons yet — need ≥2 backtest runs for the same pair and period.</p></div>';
             return;
         }
 
         let html = '';
+        let tableIdx = 0;
         for (const group of comparable) {
-            const runs = group.runs;
+            // Sort oldest first → oldest = reference row
+            const sorted = [...group.runs].sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+            const reference = sorted[0];
+            const variants = sorted.slice(1);
 
-            // Most recent baseline
-            const baseline = runs.filter(r => r.config === 'baseline')
-                .sort((a,b) => new Date(b.timestamp) - new Date(a.timestamp))[0];
-
-            // Deduplicate variants by config — keep most recent of each
-            const seen = {};
-            for (const r of runs.filter(r => r.config !== 'baseline')) {
-                if (!seen[r.config] || new Date(r.timestamp) > new Date(seen[r.config].timestamp))
-                    seen[r.config] = r;
-            }
-            const variants = Object.values(seen);
-
-            // Transposed: metrics as columns, runs as rows
             let headerCols = '<th>Config</th>';
             for (const m of COMPARE_METRICS) headerCols += `<th>${m.label}</th>`;
 
             let rows = '';
 
-            // Baseline row
-            let baselineRow = '<td class="compare-metric">Baseline</td>';
+            // Reference row (oldest run for this pair+period)
+            let refRow = `<td class="compare-metric">${reference.config} <span style="font-size:10px;color:#64748b">(ref)</span></td>`;
             for (const m of COMPARE_METRICS) {
-                const bVal = baseline[m.key] != null ? baseline[m.key] : 0;
-                baselineRow += `<td>${m.fmt(bVal)}</td>`;
+                const val = reference[m.key] != null ? reference[m.key] : 0;
+                refRow += `<td>${m.fmt(val)}</td>`;
             }
-            rows += `<tr>${baselineRow}</tr>`;
+            rows += `<tr>${refRow}</tr>`;
 
             for (const v of variants) {
                 let varRow = `<td class="compare-metric">${v.config}</td>`;
                 for (const m of COMPARE_METRICS) {
-                    varRow += `<td>${m.fmt(v[m.key] != null ? v[m.key] : 0)}</td>`;
+                    const val = v[m.key] != null ? v[m.key] : 0;
+                    const refVal = reference[m.key] != null ? reference[m.key] : 0;
+                    const better = m.higherBetter ? val > refVal : val < refVal;
+                    const worse  = m.higherBetter ? val < refVal : val > refVal;
+                    const cls = better ? ' class="positive"' : worse ? ' class="negative"' : '';
+                    varRow += `<td${cls}>${m.fmt(val)}</td>`;
                 }
                 rows += `<tr>${varRow}</tr>`;
             }
 
-            const groupIdx = comparable.indexOf(group);
+            const capturedIdx = tableIdx++;
             html += `
                 <div class="card full-width" style="margin-bottom:24px">
                     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
-                        <h3 style="margin:0">${group.period}</h3>
+                        <h3 style="margin:0">${group.pair} &mdash; ${group.period}</h3>
                         <div style="display:flex;align-items:center;gap:12px">
-                            <span style="font-size:12px;color:#94a3b8">${variants.length} variant(s) vs baseline</span>
-                            <button class="dl-xlsx-btn" onclick="downloadCompareTable(${groupIdx})" title="Download as Excel">
+                            <span style="font-size:12px;color:#94a3b8">${variants.length} run(s) vs reference</span>
+                            <button class="dl-xlsx-btn" onclick="downloadCompareTable(${capturedIdx})" title="Download as Excel">
                                 <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
                                     <path d="M8 2v8M8 10l-3-3M8 10l3-3M3 13h10"/>
                                 </svg>
@@ -642,7 +674,7 @@ async function loadLearning() {
                     </div>
                     <div class="stat-row">
                         <span class="stat-label">Total P&L</span>
-                        <span class="stat-value ${pnlClass}">\u00a3${stats.total_pnl.toFixed(2)}</span>
+                        <span class="stat-value ${pnlClass}">${fmtPnl(stats.total_pnl)}</span>
                     </div>
                 </div>`;
         }

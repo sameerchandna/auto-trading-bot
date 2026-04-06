@@ -1,0 +1,276 @@
+https://github.com/anthropics/claude-plugins-official.git
+
+----------------------------------------------------------------
+auto-trading-bot
+----------------------------------------------------------------
+Hi. This is a brand new project
+You have £10000 to trade and invest
+You can only trade on EURUSD chart to start with.
+Get to know its personality well. Master it. 
+how big are candles, ranges, retracements, recurring patterns, stuctures, waves etc.
+
+you can trade on uingt the 15m to Weekly timeframe
+there are some concepts I know but dont let this limit you. you are more powerful and wider reaching
+1) you can long and short
+3) markets are fractal, 15M, 1H, 4H,1D, Weekly, Montly 
+2) markets move in waves, impulses, correction, impulses. impulses are where you make money but you need to get in the correction
+4) Break of strutures of HGF, entry on lower timeframe
+5) market always break high or low
+6) there can be catalyts (news, events) that can trigger a move that has been set up technicaly 
+7) thre are short term , medium term and long term contexts of prices
+8) wave ending patterns 
+9) Support and resistances are like magnets, but dont need to respect as makerts make new highs and lows
+
+I want you to self learn 
+I want you build your own team of agents that you think you need.
+if something isnt working, go back adjust, try differnt things, play with parameters
+use whatever data source or system you think will be best (tradingview, yahoo etc, twitter)
+whatever you crete, create a dashboard where we can review the maket and trade stats
+Keep learning and iterating.
+
+----------------------------------------------------------------
+Strategy:                                                                                                               
+----------------------------------------------------------------
+- Higher TF (4H/Daily/Weekly): Identify market structure and Break of Structure (BOS) — determines directional bias
+- Lower TF (15M/1H): Find entries using wave-based setups — trade impulse moves after corrections
+- Liquidity sweeps: Wait for stop hunts / liquidity grabs before entering in the real direction
+- Wave structure: Enter on the impulse leg after a corrective phase completes
+
+In short: Top-down analysis — Weekly/Daily set the bias, 4H confirms structure breaks, then enter on 15M/1H pullbacks after liquidity is swept.
+----------------------------------------------------------------
+Indicator: 
+----------------------------------------------------------------
+ What it shows:
+  - Swing highs/lows - small triangles at turning points
+  - BOS (blue labels) - Break of Structure, trend continuation
+  - CHoCH (yellow labels) - Change of Character, potential reversal
+  - SWEEP (purple labels) - liquidity sweeps above/below key levels
+  - S/R zones - green (support) and red (resistance) boxes
+  - LONG/SHORT signals with confluence % score, SL line (red dotted), TP line (green dotted)
+  - Background color - green tint = bullish bias, red tint = bearish, grey = ranging
+  - Info table (top right) - current bias, wave phase, ATR, RSI, long/short scores
+
+
+----------------------------------------------------------------
+ Strategy time Frames
+----------------------------------------------------------------
+  ┌────────────────────┬─────────────────────────────┐
+  │      Purpose       │        Timeframe(s)         │
+  ├────────────────────┼─────────────────────────────┤
+  │ HTF Bias           │ Daily + Weekly (must align) │
+  ├────────────────────┼─────────────────────────────┤
+  │ BOS / CHoCH        │ 4H, 1H                      │
+  ├────────────────────┼─────────────────────────────┤
+  │ Wave phase         │ 4H, 1H                      │
+  ├────────────────────┼─────────────────────────────┤
+  │ Liquidity sweeps   │ 15M, 1H                     │
+  ├────────────────────┼─────────────────────────────┤
+  │ S/R reaction       │ 1H, 4H, 1D                  │
+  ├────────────────────┼─────────────────────────────┤
+  │ Entry (SL/TP calc) │ 15M (lowest available)      │
+  └────────────────────┴─────────────────────────────┘
+
+
+
+---------------------------------------------------------------------------------
+Investigation: Excellent find. Two issues combining to suppress shorts:
+---------------------------------------------------------------------------------
+Primary: get_htf_bias() masks bearish daily bias — data/models.py:149-160
+
+When daily = bearish but weekly = ranging (which is common), the function returns the weekly's ranging instead of the daily's bearish. This drops the HTF bias score from 1.0 to 0.3 for shorts — a ~25% penalty on the most heavily weighted signal component (0.33 weight).
+
+Secondary: Wave scoring is asymmetric in practice — analysis/confluence.py:104-115
+
+Shorts need correction_up waves, but the lower timeframes (1h, 4h) more often show correction_down / impulse_up, which scores 0 for shorts but 1.0 for longs.
+
+The result: short signals can never reach the 0.60 threshold because HTF bias + wave position together account for ~49% of the total score, and both systematically score near zero for shorts.
+
+The fix for get_htf_bias() would be: when daily and weekly disagree, prefer the one with a directional bias (bullish/bearish) over ranging. Want me to fix this?
+
+-----------------------------------------------------------------------------------
+Investigation: Daily Weekly Bias:
+-----------------------------------------------------------------------------------
+
+Bias determination per timeframe — market_structure.py:108-114
+
+Uses last 2 swing highs and last 2 swing lows (Williams fractals with SWING_LOOKBACK=5):
+
+HH + HL → BULLISH
+LH + LL → BEARISH
+Anything else (HH + LL, LH + HL) → RANGING
+This is strict — both conditions must agree. If price makes a lower low but a higher high (expansion), it's ranging.
+
+HTF bias aggregation — models.py:149-160
+
+if daily == weekly → return that bias
+else → return weekly (even if weekly = RANGING)
+Overall bias — fractals.py:10-46
+
+Weighted vote across all 5 timeframes. Needs >40% weighted score to be directional. Uses weights: 15m=1, 1h=2, 4h=3, 1d=4, 1wk=5 (total=15). Weekly alone is 5/15 = 33%, so weekly RANGING already drags the score down.
+
+How this kills shorts — confluence.py:82-89
+
+The HTF bias score (weight 0.33 — the single largest factor):
+
+Matching bias → 1.0
+Ranging → 0.3
+Opposing → 0.0
+So the math for a short signal needing 0.60:
+
+HTF = RANGING (common) → 0.3 × 0.33 = 0.10 from HTF
+Remaining factors must score 0.50 / 0.67 = 75% across BOS + wave + liquidity + SR + wave_ending
+That's extremely hard since BOS also checks bias == BEARISH on 4h/1h, and wave needs CORRECTION_UP
+Meanwhile for longs:
+
+1h and 4h are often bullish → BOS fires, wave aligns
+Even if HTF = RANGING, the long gets 0.10 from HTF + easily hits 0.50 from the other factors since they're all bullish-aligned on lower TFs
+
+The problem is really two-fold:
+get_htf_bias() throws away a bearish daily when weekly is ranging
+The 0.3 "ranging" score is too punitive — it's almost as bad as opposing (0.0)
+  
+ ------------
+ 
+
+Great point. You're right — daily turning bearish while weekly is still bullish/ranging is ambiguous. It could be an early reversal or just a pullback. My original Fix 1 handles the easy case (weekly ranging + daily directional) but doesn't address this nuance.
+
+The real problem is that get_htf_bias() collapses two timeframes into a single enum — you lose the "daily is starting to disagree" information. A better approach would be to score daily and weekly separately in the confluence scorer rather than relying on a single aggregated bias.
+
+Something like:
+  - Daily and weekly agree → full score (1.0) — clear trend
+  - Daily directional, weekly ranging → high score (0.8) — likely early trend or weekly catching up
+  - Daily opposes weekly → moderate score (0.5) — could be reversal starting or just a pullback; not enough to block the trade but not full conviction either
+  - Both ranging → low score (0.3)
+  - HTF opposes your direction → zero (0.0)
+This way, a bearish daily + bullish weekly doesn't kill a short entirely (gets 0.5 × 0.33 = 0.165 from HTF) — it acknowledges the daily might be leading the reversal, while not giving full confidence since the weekly hasn't confirmed yet.
+
+This would replace both Fix 1 and Fix 2 — we'd stop using get_htf_bias() in the scorer and look at daily/weekly directly.
+
+Want me to implement it this way?Great point. You're right — daily turning bearish while weekly is still bullish/ranging is ambiguous. It could be an early reversal or just a pullback. My original Fix 1 handles the easy case (weekly ranging + daily directional) but doesn't address this nuance.
+
+The real problem is that get_htf_bias() collapses two timeframes into a single enum — you lose the "daily is starting to disagree" information. A better approach would be to score daily and weekly separately in the confluence scorer rather than relying on a single aggregated bias.
+
+Something like:
+
+Daily and weekly agree → full score (1.0) — clear trend
+Daily directional, weekly ranging → high score (0.8) — likely early trend or weekly catching up
+Daily opposes weekly → moderate score (0.5) — could be reversal starting or just a pullback; not enough to block the trade but not full conviction either
+Both ranging → low score (0.3)
+HTF opposes your direction → zero (0.0)
+This way, a bearish daily + bullish weekly doesn't kill a short entirely (gets 0.5 × 0.33 = 0.165 from HTF) — it acknowledges the daily might be leading the reversal, while not giving full confidence since the weekly hasn't confirmed yet.
+
+This would replace both Fix 1 and Fix 2 — we'd stop using get_htf_bias() in the scorer and look at daily/weekly directly.
+
+Want me to implement it this way?
+ 
+ 
+The trend reversal signal takes a long time and in that we take trades in wring direction. 
+It works well for middle and bottom part of HTF waves
+Idea for range reversal: If daily LHL breaks the Weekly Higher Low [HL] (then could signal reversal)
+  
+
+-------------------------------------------------------------
+CONFLUENCE_THRESHOLD = 0.60 
+CONFLUENCE_THRESHOLD = 0.30
+-------------------------------------------------------------
+All 5 are in. Here's the full comparison:
+
+Threshold	Trades	WR		PF		P&L		DD		Sharpe	Expect.	Avg W	Avg L	Longs	Shorts
+0.30		1,677	41.1%	1.30	£60,633	34.4%	0.15	2.0p	20.3	10.8	894		783
+0.40		1,078	41.0%	1.27	£31,716	39.8%	0.01	2.0p	20.0	10.6	607		471
+0.45		833		43.3%	1.38	£28,385	41.8%	-0.01	2.3p	19.2	10.7	484		349
+0.50		521		44.0%	1.46	£23,167	34.3%	-0.06	2.7p	20.6	11.3	347		174
+0.60		227		42.7%	1.36	£9,187	28.6%	-0.35	2.4p	20.2	10.9	166		61
+
+Key observations:
+0.50 looks like the sweet spot — highest PF (1.46), highest expectancy (2.7 pips), decent DD (34.3%), and 521 trades is plenty for statistical significance
+0.30 generates the most raw P&L but that's mostly volume — PF is the lowest at 1.30
+0.40 is surprisingly the worst — lower PF than 0.30 AND higher DD (39.8%)
+0.45 has the highest DD at 41.8% — a bad middle ground
+0.60 has the lowest DD (28.6%) but only 227 trades and negative Sharpe
+Win/loss pips are remarkably stable across all thresholds (~20p win / ~11p loss) — the SL/TP mechanics are consistent, it's really about filtering entry quality
+My recommendation: set threshold to 0.50. Best quality-per-trade with enough volume. Want me to update optimized_params.json, sync the PineScript, and log it to ITERATIONS.md?
+
+Why not 0.3 as it makes more money 
+----------------------------------
+0.30 makes more money purely because it takes 3x more trades (1,677 vs 521). Each individual trade is lower quality:
+				0.30		0.50
+P&L per trade	£36.15		£44.47
+Expectancy		2.0 pips	2.7 pips
+PF				1.30		1.46
+Trades			1,677		521
+
+The metrics explained:
+----------------------------------------------------------------------------------
+PF (Profit Factor) = gross wins / gross losses. PF of 1.46 means for every £1 lost, you made £1.46 back. Above 1.0 = profitable, above 1.5 = good, above 2.0 = excellent.
+
+Sharpe Ratio = risk-adjusted return. Measures how much return you get per unit of volatility. Above 0 = positive risk-adjusted, above 1.0 = strong. Negative means the volatility outweighs the returns — you're on a bumpy ride for modest gains.
+
+Expectancy = average pips you expect to make per trade. Formula: (WR × Avg Win) - ((1-WR) × Avg Loss). Higher = each trade is worth more on average.
+
+Why that matters in live trading:
+----------------------------------------------------------------------------------
+Compounding risk — at 0.30, you're taking 1,677 trades with a thinner edge. One bad streak hits harder. A PF of 1.30 is fragile — slippage, spread widening, or slightly different live conditions could push it below 1.0.
+
+PF 1.46 has more safety margin — real trading always performs worse than backtest. A 0.46 buffer above breakeven is much safer than 0.30.
+The DD tells the story — 0.30 already hits 34% DD despite more trades smoothing the curve. In live, that could easily become 40%+.
+That said — you might be right. If you believe the edge is real and stable, more trades = more money. It depends on your risk tolerance.
+
+Want to go with 0.30 (max volume), 0.50 (best quality), or something else?
+----------------------------------------------------------------------------------
+
+SL 1.5 and Differnt CONFIDECE COMPARISON
+----------------------------------------------------------------------------------
+SL = 1.0x ATR
+Thr			Trades	WR		PF		P&L			DD		Sharpe	Expect	Avg W	Avg L
+0.30		1,677	41.1%	1.30	£60,633		34.4%	0.15	2.0p	20.3	10.8
+0.40		1,078	41.0%	1.27	£31,716		39.8%	0.01	2.0p	20.0	10.6
+0.45		833		43.3%	1.38	£28,385		41.8%	-0.01	2.3p	19.2	10.7
+0.50		521		44.0%	1.46	£23,167		34.3%	-0.06	2.7p	20.6	11.3
+0.60		227		42.7%	1.36	£9,187		28.6%	-0.35	2.4p	20.2	10.9
+SL = 1.5x ATR
+Thr			Trades	WR		PF		P&L			DD		Sharpe	Expect	Avg W	Avg L
+0.30		1,067	39.1%	1.26	£40,796		37.4%	0.05	2.7p	30.9	15.4
+0.40		698		39.8%	1.27	£26,077		32.1%	-0.04	2.9p	30.6	15.4
+0.45		561		42.8%	1.45	£31,608		31.7%	0.00	4.0p	30.2	15.7
+0.50		368		43.2%	1.48	£21,403		29.0%	-0.09	3.8p	30.7	16.7
+0.60		174		42.0%	1.41	£8,650		20.5%	-0.36	2.7p	30.3	17.3
+Key takeaways:
+1.5x ATR consistently gives higher expectancy per trade (wider stops = more room to breathe, bigger wins when right), but fewer trades because the wider SL means bigger position risk so the portfolio risk cap kicks in sooner.
+
+Top 3 candidates:
+Config			Why
+0.50 / 1.5ATR	Best PF (1.48), 3.8p expect, 29% DD, 368 trades
+0.45 / 1.5ATR	Close PF (1.45), best expect (4.0p), 561 trades, 31.7% DD
+0.50 / 1.0ATR	PF 1.46, 2.7p expect, 521 trades, tighter stops
+
+The 0.50/1.5ATR combo has the best balance — highest PF, reasonable DD, and 368 trades is still plenty for statistical confidence. What do you think?
+
+im thinking 0.45/1.5ATR.  we want decent quiality seup cos this is one ccy pair we may want to apply and trade other pairs also later. the startegy is generic... what think
+Good thinking. I agree with 0.45/1.5ATR for a multi-pair strategy. Here's why:
+
+More trades = better validation across pairs. When you apply this to GBPUSD, USDJPY etc, you want enough signal volume per pair to know quickly if the edge holds. 561 trades on EURUSD over 3 years is ~187/year — that's roughly one every 1.3 trading days. At 0.50 you'd get one every 2 days, which is slower feedback when testing a new pair.
+
+The expectancy is the highest of all 10 scenarios at 4.0 pips. That's your edge per trade — and it needs to survive spread + slippage on each pair. 4.0p gives more buffer than 3.8p.
+
+DD will improve with diversification. The 31.7% DD is on one pair only. When you're running 3-4 uncorrelated pairs, drawdowns won't all happen at the same time — the portfolio DD will be lower than any single pair.
+
+PF 1.45 is solid. Only 0.03 behind 0.50's 1.48 — negligible difference.
+
+
+-----------------------------------------------
+Converted from EURUSD to multi-asset 
+-----------------------------------------------
+NEXT POSSIBLE STEPS
+
+1. Cross-asset backtesting — run all 5 pairs and see which actually have positive expectancy. The PnL formula fix means results will differ from old EURUSD backtests.
+
+2. Per-asset parameter optimization — currently config/optimized_params.json holds one set of weights for all pairs. Different assets (trending index vs ranging forex) likely need different weights/thresholds.
+
+3. Strategy validation on non-forex — the confluence scoring was built around EURUSD structure. Indices (US30) and commodities (XAUUSD) have different session hours, ATR ranges, and wave characteristics. Worth backtesting to see if it holds up before live-trading them.
+
+4. Position sizing currency conversion — the current formula assumes GBP≈USD. For XAUUSD and US30, gains are in USD but the account is GBP, so sizing is slightly off. A live FX rate lookup would fix this.
+
+5. /update-strategy skill — currently only syncs EURUSD params to PineScript. Could be extended to handle per-pair pine indicators.
+
+What would you like to tackle first?
