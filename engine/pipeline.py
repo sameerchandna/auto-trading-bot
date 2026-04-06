@@ -30,6 +30,7 @@ class TradingPipeline:
 
         self._running = False
         self._last_fetch: dict[str, datetime] = {}
+        self._using_default_params: bool = False
 
         # Wire up events
         bus.subscribe("position_closed", self._on_position_closed)
@@ -48,8 +49,16 @@ class TradingPipeline:
                 # Update signal generator weights
                 from config.settings import CONFLUENCE_WEIGHTS
                 self.signal_gen.update_weights(CONFLUENCE_WEIGHTS)
+                logger.info("Loaded optimized parameters")
+            else:
+                self._using_default_params = True
+                logger.warning(
+                    "No optimized params found — running on defaults. "
+                    "Run 'python main.py backtest' to generate them."
+                )
         except Exception as e:
-            logger.warning(f"Could not load optimized params: {e}")
+            self._using_default_params = True
+            logger.warning(f"Could not load optimized params: {e} — running on defaults")
 
         # Sync capital with OANDA account
         try:
@@ -238,6 +247,7 @@ class TradingPipeline:
         """Get current pipeline status."""
         return {
             "running": self._running,
+            "using_default_params": self._using_default_params,
             "risk": self.risk_mgr.get_stats(),
             "learning": self.learner.get_learning_summary(),
             "last_context": (

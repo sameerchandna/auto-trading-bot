@@ -12,6 +12,8 @@ from dotenv import load_dotenv
 
 from config.assets import get_asset, DEFAULT_ASSET, resolve_pair_name
 from config.settings import PAIR, PAIR_NAME, TIMEFRAMES, HISTORY_START
+from sqlalchemy import insert as sa_insert
+
 from data.models import Candle
 from storage.database import CandleRecord, get_session
 
@@ -60,41 +62,29 @@ def fetch_all_timeframes(pair: str = PAIR) -> dict[str, list[Candle]]:
 
 
 def save_candles(candles: list[Candle], pair: str = PAIR):
-    """Save candles to database, skipping duplicates."""
+    """Save candles to database, replacing duplicates in bulk."""
     if not candles:
         return
 
     session = get_session()
-    saved = 0
     try:
-        for c in candles:
-            existing = session.query(CandleRecord).filter_by(
-                pair=pair,
-                timeframe=c.timeframe,
-                timestamp=c.timestamp,
-            ).first()
-
-            if existing:
-                existing.open = c.open
-                existing.high = c.high
-                existing.low = c.low
-                existing.close = c.close
-                existing.volume = c.volume
-            else:
-                session.add(CandleRecord(
-                    pair=pair,
-                    timeframe=c.timeframe,
-                    timestamp=c.timestamp,
-                    open=c.open,
-                    high=c.high,
-                    low=c.low,
-                    close=c.close,
-                    volume=c.volume,
-                ))
-                saved += 1
-
+        rows = [
+            {
+                "pair": pair,
+                "timeframe": c.timeframe,
+                "timestamp": c.timestamp,
+                "open": c.open,
+                "high": c.high,
+                "low": c.low,
+                "close": c.close,
+                "volume": c.volume,
+            }
+            for c in candles
+        ]
+        stmt = sa_insert(CandleRecord).prefix_with("OR REPLACE").values(rows)
+        session.execute(stmt)
         session.commit()
-        logger.info(f"Saved {saved} new candles for {pair}")
+        logger.info(f"Upserted {len(rows)} candles for {pair}")
     except Exception as e:
         session.rollback()
         logger.error(f"Error saving candles: {e}")

@@ -73,6 +73,7 @@ class PositionRecord(Base):
     stop_loss = Column(Float, nullable=True)
     take_profit = Column(Float, nullable=True)
     confluence_score = Column(Float, default=0.0)
+    oanda_trade_id = Column(String(50), nullable=True)
 
 
 class TradeJournalRecord(Base):
@@ -121,12 +122,15 @@ _SessionFactory = None
 
 
 def _migrate_add_pair_columns():
-    """Add pair column to tables that lack it (backward-compatible)."""
+    """Add missing columns to tables (backward-compatible)."""
     conn = sqlite3.connect(str(DB_PATH))
     for table in ["positions", "backtest_runs", "trade_journal"]:
         cols = [row[1] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()]
         if "pair" not in cols:
             conn.execute(f"ALTER TABLE {table} ADD COLUMN pair VARCHAR(20) DEFAULT 'EURUSD'")
+    pos_cols = [row[1] for row in conn.execute("PRAGMA table_info(positions)").fetchall()]
+    if "oanda_trade_id" not in pos_cols:
+        conn.execute("ALTER TABLE positions ADD COLUMN oanda_trade_id VARCHAR(50)")
     conn.commit()
     conn.close()
 

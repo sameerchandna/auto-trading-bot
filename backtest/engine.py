@@ -1,6 +1,6 @@
 """Backtesting engine - replay historical data through the pipeline."""
 import logging
-from bisect import bisect_right
+from bisect import bisect_left
 from datetime import datetime, timedelta
 
 from data.models import Candle, Position, Direction, TradeStatus
@@ -18,9 +18,13 @@ logger = logging.getLogger(__name__)
 
 
 def _bisect_candles(candles: list, target_date: datetime) -> int:
-    """Find index of last candle with timestamp <= target_date."""
+    """Find index of first candle with timestamp >= target_date.
+
+    Using bisect_left ensures the window only includes candles that closed
+    *before* target_date, avoiding lookahead bias from the currently-open candle.
+    """
     timestamps = [c.timestamp for c in candles]
-    return bisect_right(timestamps, target_date)
+    return bisect_left(timestamps, target_date)
 
 
 class BacktestEngine:
@@ -48,6 +52,7 @@ class BacktestEngine:
         self.all_trades: list[Position] = []
         self._consecutive_losses: int = 0
         self._cooldown_remaining: int = 0
+        self._tracked_closed_count: int = 0
 
     def run(self, weights: dict | None = None) -> dict:
         """Run the backtest.
@@ -142,8 +147,6 @@ class BacktestEngine:
             self.risk_mgr.update_positions(current_price)
 
             # Track consecutive losses for cooldown
-            if not hasattr(self, '_tracked_closed_count'):
-                self._tracked_closed_count = 0
             prev_count = self._tracked_closed_count
             current_closed = self.risk_mgr.closed_positions
             for p in current_closed[prev_count:]:

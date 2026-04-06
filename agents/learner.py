@@ -90,7 +90,12 @@ class LearnerAgent(BaseAgent):
         )
 
     def _optimize_parameters(self) -> bool:
-        """Adjust parameters based on accumulated performance data."""
+        """Log current performance stats. Weight adjustment is not yet implemented.
+
+        NOTE: Do NOT implement live weight adjustment here without a holdout set.
+        All parameter optimization runs through Optuna (backtest/optimizer.py) on
+        historical data. This method is stats-only until OOS validation is in place.
+        """
         # Only optimize if we have enough data
         total_trades = sum(s.total_trades for s in self.setup_stats.values())
         if total_trades < MIN_TRADES_FOR_STATS:
@@ -99,10 +104,7 @@ class LearnerAgent(BaseAgent):
             )
             return False
 
-        self.logger.info(f"Running parameter optimization (trade #{self.trade_count})...")
-
-        # Adjust confluence weights based on which setups perform best
-        new_weights = self.current_params.confluence_weights.copy()
+        self.logger.info(f"Performance snapshot at trade #{self.trade_count}:")
 
         best_setups = sorted(
             self.setup_stats.values(),

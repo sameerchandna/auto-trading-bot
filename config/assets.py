@@ -12,6 +12,7 @@ class AssetSpec:
     price_decimals: int    # Decimal places for order formatting
     lot_size: int          # Standard lot size in base units
     asset_class: str       # "forex", "commodity", "index"
+    quote_currency: str    # Quote currency for GBP conversion: "USD", "EUR", etc.
 
 
 ASSETS: dict[str, AssetSpec] = {
@@ -23,6 +24,7 @@ ASSETS: dict[str, AssetSpec] = {
         price_decimals=5,
         lot_size=100_000,
         asset_class="forex",
+        quote_currency="USD",
     ),
     "AUDUSD": AssetSpec(
         name="AUDUSD",
@@ -32,6 +34,7 @@ ASSETS: dict[str, AssetSpec] = {
         price_decimals=5,
         lot_size=100_000,
         asset_class="forex",
+        quote_currency="USD",
     ),
     "XAUUSD": AssetSpec(
         name="XAUUSD",
@@ -41,6 +44,7 @@ ASSETS: dict[str, AssetSpec] = {
         price_decimals=2,
         lot_size=100,
         asset_class="commodity",
+        quote_currency="USD",
     ),
     "US30": AssetSpec(
         name="US30",
@@ -50,6 +54,7 @@ ASSETS: dict[str, AssetSpec] = {
         price_decimals=1,
         lot_size=1,
         asset_class="index",
+        quote_currency="USD",
     ),
     "WTICO": AssetSpec(
         name="WTICO",
@@ -59,6 +64,7 @@ ASSETS: dict[str, AssetSpec] = {
         price_decimals=2,
         lot_size=1000,
         asset_class="commodity",
+        quote_currency="USD",
     ),
 }
 

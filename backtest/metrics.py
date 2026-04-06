@@ -119,6 +119,7 @@ def _calculate_drawdown(
     values = [v for _, v in equity_curve]
     peak = values[0]
     max_dd = 0.0
+    peak_at_max_dd = peak
 
     for value in values:
         if value > peak:
@@ -126,48 +127,58 @@ def _calculate_drawdown(
         dd = peak - value
         if dd > max_dd:
             max_dd = dd
+            peak_at_max_dd = peak
 
-    max_dd_pct = max_dd / initial_capital if initial_capital > 0 else 0
+    max_dd_pct = max_dd / peak_at_max_dd if peak_at_max_dd > 0 else 0
     return max_dd, max_dd_pct
+
+
+def _daily_excess_returns(
+    equity_curve: list[tuple[datetime, float]],
+    risk_free_rate: float = 0.04,
+) -> list[float]:
+    """Resample 1H equity curve to daily (last value per calendar day) and return excess returns."""
+    if len(equity_curve) < 2:
+        return []
+
+    daily: dict = {}
+    for dt, v in equity_curve:
+        daily[dt.date()] = v  # last value per day wins
+
+    daily_values = list(daily.values())
+    if len(daily_values) < 2:
+        return []
+
+    daily_rf = risk_free_rate / 252
+    returns = [
+        (daily_values[i] - daily_values[i - 1]) / daily_values[i - 1]
+        for i in range(1, len(daily_values))
+        if daily_values[i - 1] != 0
+    ]
+    return [r - daily_rf for r in returns]
 
 
 def _calculate_sharpe(
     equity_curve: list[tuple[datetime, float]],
     risk_free_rate: float = 0.04,
 ) -> float:
-    """Calculate annualized Sharpe ratio."""
-    if len(equity_curve) < 2:
+    """Calculate annualized Sharpe ratio using daily returns."""
+    excess = _daily_excess_returns(equity_curve, risk_free_rate)
+    if not excess or np.std(excess) == 0:
         return 0.0
-
-    values = [v for _, v in equity_curve]
-    returns = [(values[i] - values[i-1]) / values[i-1]
-               for i in range(1, len(values)) if values[i-1] != 0]
-
-    if not returns or np.std(returns) == 0:
-        return 0.0
-
-    daily_rf = risk_free_rate / 252
-    excess_returns = [r - daily_rf for r in returns]
-
-    return float(np.mean(excess_returns) / np.std(excess_returns) * np.sqrt(252))
+    return float(np.mean(excess) / np.std(excess) * np.sqrt(252))
 
 
 def _calculate_sortino(
     equity_curve: list[tuple[datetime, float]],
     risk_free_rate: float = 0.04,
 ) -> float:
-    """Calculate annualized Sortino ratio (only penalizes downside vol)."""
-    if len(equity_curve) < 2:
+    """Calculate annualized Sortino ratio using daily returns (only penalizes downside vol)."""
+    excess = _daily_excess_returns(equity_curve, risk_free_rate)
+    if not excess:
         return 0.0
 
-    values = [v for _, v in equity_curve]
-    returns = [(values[i] - values[i-1]) / values[i-1]
-               for i in range(1, len(values)) if values[i-1] != 0]
-
-    daily_rf = risk_free_rate / 252
-    excess_returns = [r - daily_rf for r in returns]
-    downside = [r for r in excess_returns if r < 0]
-
+    downside = [r for r in excess if r < 0]
     if not downside:
         return 0.0
 
@@ -175,7 +186,7 @@ def _calculate_sortino(
     if downside_std == 0:
         return 0.0
 
-    return float(np.mean(excess_returns) / downside_std * np.sqrt(252))
+    return float(np.mean(excess) / downside_std * np.sqrt(252))
 
 
 def _consecutive_streaks(trades: list[Position]) -> tuple[int, int]:

@@ -40,12 +40,19 @@ class ExecutorAgent(BaseAgent):
             oanda_trade_id = None
             if USE_OANDA:
                 oanda_trade_id = self._execute_oanda(position)
+                if oanda_trade_id is None:
+                    self.logger.error(
+                        f"OANDA rejected order for {position.signal.pair} "
+                        f"{position.signal.direction.value} — skipping record"
+                    )
+                    continue
 
-            # Record to database
-            self._record_trade(position)
+            # Record to database (only reached if OANDA succeeded or not in use)
+            self._record_trade(position, oanda_trade_id)
 
-            if oanda_trade_id and position.id:
-                self.oanda_trade_map[position.id] = oanda_trade_id
+            if position.id:
+                if oanda_trade_id:
+                    self.oanda_trade_map[position.id] = oanda_trade_id
 
             executed.append(position)
             self.execution_log.append({
@@ -99,7 +106,7 @@ class ExecutorAgent(BaseAgent):
             self.logger.error(f"OANDA execution failed: {e}")
             return None
 
-    def _record_trade(self, position: Position):
+    def _record_trade(self, position: Position, oanda_trade_id: str | None = None):
         """Save trade to database."""
         session = get_session()
         try:
@@ -132,6 +139,7 @@ class ExecutorAgent(BaseAgent):
                 stop_loss=position.signal.stop_loss,
                 take_profit=position.signal.take_profit,
                 confluence_score=position.signal.confluence_score,
+                oanda_trade_id=oanda_trade_id,
             )
             session.add(pos_rec)
             session.commit()
@@ -148,15 +156,32 @@ class ExecutorAgent(BaseAgent):
     def record_close(self, position: Position):
         """Update position record when closed, and close on OANDA."""
         # Close on OANDA if we have a trade ID
-        if USE_OANDA and position.id in self.oanda_trade_map:
-            try:
-                from data.oanda import close_trade
-                trade_id = self.oanda_trade_map[position.id]
-                close_trade(trade_id)
-                self.logger.info(f"OANDA trade {trade_id} closed")
-                del self.oanda_trade_map[position.id]
-            except Exception as e:
-                self.logger.error(f"OANDA close failed: {e}")
+        if USE_OANDA:
+            trade_id = self.oanda_trade_map.get(position.id)
+            if trade_id is None and position.id:
+                # Not in memory map (e.g. after a restart) — look up from DB
+                session = get_session()
+                try:
+                    rec = session.query(PositionRecord).filter_by(id=position.id).first()
+                    if rec:
+                        trade_id = rec.oanda_trade_id
+                finally:
+                    session.close()
+            if trade_id:
+                try:
+                    from data.oanda import close_trade
+                    close_trade(trade_id)
+                    self.logger.info(f"OANDA trade {trade_id} closed")
+                    self.oanda_trade_map.pop(position.id, None)
+                except Exception as e:
+                    err_str = str(e)
+                    if "404" in err_str or "TRADE_DOESNT_EXIST" in err_str:
+                        self.logger.info(
+                            f"OANDA trade {trade_id} already closed (SL/TP hit): {e}"
+                        )
+                        self.oanda_trade_map.pop(position.id, None)
+                    else:
+                        self.logger.error(f"OANDA close failed: {e}")
 
         # Update database
         session = get_session()
