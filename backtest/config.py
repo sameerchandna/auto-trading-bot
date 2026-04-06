@@ -32,6 +32,10 @@ class BacktestConfig:
     exclude_timeframes: list[str] = field(default_factory=list)
     """Timeframes to exclude from analysis (e.g. ['15m'] to skip 15-min candles)."""
 
+    # --- SL placement method ---
+    sl_method: str = "atr"
+    """Stop-loss placement: 'atr' (current behaviour) or 'structure' (below sweep/swing level)."""
+
     def label(self) -> str:
         """Short human-readable label for this config."""
         parts = []
@@ -48,6 +52,8 @@ class BacktestConfig:
             parts.append(f"cooldown-{self.cooldown_after_losses}")
         if self.exclude_timeframes:
             parts.append(f"no-{'+'.join(self.exclude_timeframes)}")
+        if self.sl_method != "atr":
+            parts.append(f"sl-{self.sl_method}")
         return ", ".join(parts) if parts else "baseline"
 
     def tags(self) -> list[str]:
@@ -65,6 +71,7 @@ class BacktestConfig:
             t.append(f"cooldown_{self.cooldown_after_losses}")
         if self.exclude_timeframes:
             t.append(f"no_{'_'.join(self.exclude_timeframes)}")
+        t.append(f"sl_{self.sl_method}")
         return t
 
 

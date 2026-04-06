@@ -23,6 +23,7 @@ def score_confluence(
     dominance_margin: float | None = None,
     sl_atr_mult: float | None = None,
     tp_rr: float | None = None,
+    sl_method: str = "atr",
 ) -> list[Signal]:
     """Score all possible setups and return signals that meet threshold.
 
@@ -75,7 +76,7 @@ def score_confluence(
         signal = _build_signal(
             context, direction, best_score, entry_tf.atr, entry_tf_name,
             trigger_tf=winning_trigger_tf, scores=winning_scores,
-            sl_atr_mult=sl_atr_mult, tp_rr=tp_rr,
+            sl_atr_mult=sl_atr_mult, tp_rr=tp_rr, sl_method=sl_method,
         )
         if signal:
             signals.append(signal)
@@ -133,12 +134,12 @@ def _score_direction(
             analysis = context.analyses[tf]
             if analysis.structure.last_break == StructureBreak.BOS:
                 if analysis.structure.bias == target_bias:
-                    if 1.0 > bos_score:
+                    if bos_score < 1.0:
                         bos_score = 1.0
                         trigger_tf = tf
             elif analysis.structure.last_break == StructureBreak.CHOCH:
                 # CHoCH in our direction = potential reversal entry
-                if 0.6 > bos_score:
+                if bos_score < 0.6:
                     bos_score = 0.6
                     trigger_tf = tf
     scores["bos"] = bos_score
@@ -215,6 +216,42 @@ def _score_direction(
     return total, trigger_tf, scores
 
 
+def _structure_sl(
+    context: PriceContext,
+    direction: Direction,
+    trigger_tf: str,
+    atr: float,
+) -> float | None:
+    """Return a structure-based stop-loss price, or None if no level found.
+
+    Priority: liquidity sweep level > swing point from trigger TF structure.
+    Buffer of 0.3 * ATR is applied beyond the structure level.
+    """
+    buffer = 0.3 * atr
+
+    # 1. Prefer sweep level — it's the most specific invalidation point
+    for tf in [trigger_tf, "15m", "1h"]:
+        analysis = context.analyses.get(tf)
+        if not analysis:
+            continue
+        for sweep in analysis.liquidity_sweeps:
+            if sweep.confirmed and sweep.direction == direction:
+                if direction == Direction.LONG:
+                    return round(sweep.swept_level - buffer, 5)
+                else:
+                    return round(sweep.swept_level + buffer, 5)
+
+    # 2. Fall back to last swing point on trigger TF structure
+    trigger_analysis = context.analyses.get(trigger_tf)
+    if trigger_analysis:
+        if direction == Direction.LONG and trigger_analysis.structure.last_swing_low:
+            return round(trigger_analysis.structure.last_swing_low.price - buffer, 5)
+        if direction == Direction.SHORT and trigger_analysis.structure.last_swing_high:
+            return round(trigger_analysis.structure.last_swing_high.price + buffer, 5)
+
+    return None
+
+
 def _build_signal(
     context: PriceContext,
     direction: Direction,
@@ -225,6 +262,7 @@ def _build_signal(
     scores: dict | None = None,
     sl_atr_mult: float = SL_ATR_MULTIPLIER,
     tp_rr: float = TP_RISK_REWARD,
+    sl_method: str = "atr",
 ) -> Signal | None:
     """Build a trade signal with entry, SL, and TP."""
     entry_tf = context.analyses.get(entry_tf_name)
@@ -233,12 +271,24 @@ def _build_signal(
 
     current_price = entry_tf.current_price
 
+    if sl_method == "structure":
+        stop_loss = _structure_sl(context, direction, trigger_tf, atr)
+        if stop_loss is None:
+            return None  # No valid structure level — skip signal
+        # Enforce minimum stop distance of 0.5 * ATR
+        dist = abs(current_price - stop_loss)
+        if dist < 0.5 * atr:
+            return None
+    else:
+        if direction == Direction.LONG:
+            stop_loss = round(current_price - atr * sl_atr_mult, 5)
+        else:
+            stop_loss = round(current_price + atr * sl_atr_mult, 5)
+
     if direction == Direction.LONG:
-        stop_loss = round(current_price - atr * sl_atr_mult, 5)
         risk = current_price - stop_loss
         take_profit = round(current_price + risk * tp_rr, 5)
     else:
-        stop_loss = round(current_price + atr * sl_atr_mult, 5)
         risk = stop_loss - current_price
         take_profit = round(current_price - risk * tp_rr, 5)
 

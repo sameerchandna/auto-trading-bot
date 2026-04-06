@@ -335,6 +335,7 @@ def compare(
     block_days: str = typer.Option("", "--block-days"),
     cooldown: int = typer.Option(0, "--cooldown"),
     exclude_tf: str = typer.Option("", "--exclude-tf", help="Comma-separated timeframes to exclude (e.g. '15m')"),
+    sl_method: str = typer.Option("atr", "--sl-method", help="SL placement: 'atr' or 'structure'"),
 ):
     """Run baseline vs. a modified config and show side-by-side results."""
     setup_logging()
@@ -353,6 +354,7 @@ def compare(
         block_days=[day_map[d.strip().lower()] for d in block_days.split(",") if d.strip()] if block_days else [],
         cooldown_after_losses=cooldown,
         exclude_timeframes=[t.strip() for t in exclude_tf.split(",") if t.strip()] if exclude_tf else [],
+        sl_method=sl_method,
     )
 
     if test_cfg.label() == "baseline":

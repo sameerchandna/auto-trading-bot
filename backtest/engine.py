@@ -161,6 +161,7 @@ class BacktestEngine:
                 threshold=self.params["threshold"],
                 sl_atr_mult=self.params["sl_multiplier"],
                 tp_rr=self.params["tp_risk_reward"],
+                sl_method=self.config.sl_method,
             )
 
             # Apply config filters before execution
