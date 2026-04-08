@@ -81,8 +81,12 @@ def save_candles(candles: list[Candle], pair: str = PAIR):
             }
             for c in candles
         ]
-        stmt = sa_insert(CandleRecord).prefix_with("OR REPLACE").values(rows)
-        session.execute(stmt)
+        # SQLite caps parameters per statement (default 999, 32766 on newer builds).
+        # 8 columns per row → batch at 2000 rows to stay well under both limits.
+        BATCH = 2000
+        for i in range(0, len(rows), BATCH):
+            stmt = sa_insert(CandleRecord).prefix_with("OR REPLACE").values(rows[i:i + BATCH])
+            session.execute(stmt)
         session.commit()
         logger.info(f"Upserted {len(rows)} candles for {pair}")
     except Exception as e:

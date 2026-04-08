@@ -19,8 +19,11 @@ logger = logging.getLogger(__name__)
 class LearnerAgent(BaseAgent):
     """Tracks what works and adjusts parameters."""
 
-    def __init__(self):
+    def __init__(self, frozen: bool = True):
         super().__init__("learner")
+        # When frozen=True, learner is stats-only: no param mutation, no snapshots.
+        # Demo period runs frozen; research agent owns parameter search.
+        self.frozen = frozen
         self.trade_count = 0
         self.setup_stats: dict[str, SetupStats] = {}
         self.current_params = ParameterSet(
@@ -41,7 +44,9 @@ class LearnerAgent(BaseAgent):
         self._update_stats(position)
 
         params_updated = False
-        if self.trade_count % OPTIMIZATION_INTERVAL == 0:
+        if self.frozen:
+            self.logger.debug("Learner frozen — skipping parameter optimization")
+        elif self.trade_count % OPTIMIZATION_INTERVAL == 0:
             params_updated = self._optimize_parameters()
 
         return {

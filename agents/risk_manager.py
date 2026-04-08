@@ -139,9 +139,14 @@ class RiskManagerAgent(BaseAgent):
             pnl_pips = (position.entry_price - exit_price) / asset.pip_value
 
         position.pnl_pips = round(pnl_pips, 1)
-        # P&L = price_change * position_size (matches our sizing: size = risk / sl_distance)
+        # P&L in quote currency = price_change * position_size
         price_change = (exit_price - position.entry_price) if position.signal.direction == Direction.LONG else (position.entry_price - exit_price)
-        position.pnl = round(price_change * position.size, 2)
+        pnl_quote = price_change * position.size
+
+        # Convert quote-currency P&L to GBP (account currency)
+        from data.fx import to_gbp
+        pnl_gbp = to_gbp(pnl_quote, asset.quote_currency)
+        position.pnl = round(pnl_gbp, 2)
 
         self.capital += position.pnl
         self.daily_pnl += position.pnl
@@ -158,12 +163,32 @@ class RiskManagerAgent(BaseAgent):
 
         bus.publish("position_closed", position)
 
+    def daily_limit_breached(self) -> bool:
+        """True when realised daily loss has reached the daily limit."""
+        return (
+            self.daily_pnl < 0
+            and abs(self.daily_pnl) >= self.capital * DAILY_LOSS_LIMIT
+        )
+
     def update_positions(self, current_price: float, pair: str | None = None):
-        """Check SL/TP for open positions, optionally filtered by pair."""
+        """Check SL/TP for open positions, optionally filtered by pair.
+
+        If the daily loss limit has been breached, force-close any matching
+        open position at the current price instead of waiting for SL/TP.
+        """
+        breached = self.daily_limit_breached()
         for position in self.open_positions[:]:
             if pair and position.signal.pair != pair:
                 continue
             signal = position.signal
+
+            if breached:
+                self.logger.warning(
+                    f"DAILY LOSS LIMIT breached — force-closing "
+                    f"{signal.pair} {signal.direction.value} @ {current_price}"
+                )
+                self.close_position(position, current_price)
+                continue
 
             if signal.direction == Direction.LONG:
                 if current_price <= signal.stop_loss:

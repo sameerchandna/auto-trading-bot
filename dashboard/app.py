@@ -22,6 +22,10 @@ app = FastAPI(title="Auto Trading Bot Dashboard")
 STATIC_DIR = Path(__file__).parent / "static"
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
+# Approval routes for one-click email actions (Phase 3)
+from notifications.approval_handler import register_approval_routes
+register_approval_routes(app)
+
 
 @app.get("/", response_class=HTMLResponse)
 async def index():

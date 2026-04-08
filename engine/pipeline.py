@@ -69,7 +69,100 @@ class TradingPipeline:
         except Exception as e:
             logger.warning(f"Could not sync OANDA balance: {e}")
 
+        # Reconcile open positions with OANDA so restarts don't orphan state
+        try:
+            self._reconcile_open_positions()
+        except Exception as e:
+            logger.warning(f"Position reconciliation failed: {e}")
+
         logger.info("Trading pipeline initialized")
+
+    def _reconcile_open_positions(self):
+        """On startup, rebuild in-memory open positions from OANDA + DB.
+
+        - For every OANDA open trade, find its matching DB PositionRecord via
+          oanda_trade_id, reconstruct a Position, and register it with the
+          risk manager + executor.
+        - DB rows marked open but missing on OANDA are assumed externally
+          closed and are marked closed (no fill price available — logged).
+        - OANDA trades missing from the DB are logged as orphans; they are
+          not added to internal state.
+        """
+        import os
+        if not os.getenv("OANDA_API_KEY"):
+            return
+
+        from data.oanda import get_open_trades
+        from storage.database import PositionRecord, SignalRecord, get_session
+        from data.models import Signal, Position, Direction, SignalType, TradeStatus
+
+        oanda_trades = {str(t.get("id")): t for t in get_open_trades()}
+
+        session = get_session()
+        try:
+            open_rows = session.query(PositionRecord).filter_by(status="open").all()
+
+            reconciled = 0
+            for rec in open_rows:
+                if not rec.oanda_trade_id or rec.oanda_trade_id not in oanda_trades:
+                    logger.warning(
+                        f"DB position #{rec.id} ({rec.pair}) marked open but not "
+                        f"found on OANDA — marking closed"
+                    )
+                    rec.status = "closed"
+                    continue
+
+                sig_rec = (
+                    session.query(SignalRecord).filter_by(id=rec.signal_id).first()
+                    if rec.signal_id else None
+                )
+                try:
+                    signal = Signal(
+                        timestamp=sig_rec.timestamp if sig_rec else rec.opened_at,
+                        pair=rec.pair,
+                        direction=Direction(rec.direction),
+                        signal_type=SignalType(rec.signal_type or "bos_continuation"),
+                        entry_price=rec.entry_price,
+                        stop_loss=rec.stop_loss or rec.entry_price,
+                        take_profit=rec.take_profit or rec.entry_price,
+                        confluence_score=rec.confluence_score or 0.0,
+                        entry_timeframe=sig_rec.entry_timeframe if sig_rec else "15m",
+                        trigger_timeframe=sig_rec.trigger_timeframe if sig_rec else "4h",
+                    )
+                except Exception as e:
+                    logger.warning(f"Could not rebuild Signal for position #{rec.id}: {e}")
+                    continue
+
+                position = Position(
+                    id=rec.id,
+                    signal=signal,
+                    status=TradeStatus.OPEN,
+                    entry_price=rec.entry_price,
+                    size=rec.size,
+                    risk_amount=rec.risk_amount,
+                    opened_at=rec.opened_at,
+                )
+                self.risk_mgr.open_positions.append(position)
+                self.executor.oanda_trade_map[rec.id] = rec.oanda_trade_id
+                reconciled += 1
+
+            session.commit()
+
+            db_trade_ids = {
+                r.oanda_trade_id for r in open_rows if r.oanda_trade_id
+            }
+            orphans = [tid for tid in oanda_trades if tid not in db_trade_ids]
+            for tid in orphans:
+                logger.warning(
+                    f"OANDA trade {tid} open but not tracked in DB — leaving untouched"
+                )
+
+            logger.info(
+                f"Reconciled {reconciled} open position(s) from OANDA "
+                f"({len(orphans)} orphan OANDA trade(s))"
+            )
+        finally:
+            session.close()
 
     def run_once(self) -> dict:
         """Run a single cycle of the pipeline for all active pairs.

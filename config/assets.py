@@ -36,6 +36,16 @@ ASSETS: dict[str, AssetSpec] = {
         asset_class="forex",
         quote_currency="USD",
     ),
+    "GBPUSD": AssetSpec(
+        name="GBPUSD",
+        oanda_instrument="GBP_USD",
+        yahoo_ticker="GBPUSD=X",
+        pip_value=0.0001,
+        price_decimals=5,
+        lot_size=100_000,
+        asset_class="forex",
+        quote_currency="USD",
+    ),
     "XAUUSD": AssetSpec(
         name="XAUUSD",
         oanda_instrument="XAU_USD",
@@ -69,7 +79,7 @@ ASSETS: dict[str, AssetSpec] = {
 }
 
 # Which assets are actively fetched/traded
-ACTIVE_ASSETS: list[str] = ["EURUSD", "AUDUSD", "US30", "XAUUSD", "WTICO"]
+ACTIVE_ASSETS: list[str] = ["EURUSD", "AUDUSD", "GBPUSD", "US30", "XAUUSD", "WTICO"]
 DEFAULT_ASSET = "EURUSD"
 
 

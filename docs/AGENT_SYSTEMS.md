@@ -36,10 +36,15 @@
 ✅ LearnerAgent confirmed stats-only — comment updated, live weight adjustment blocked
 
 ### Issues Identified, Not Yet Fixed
-- Daily loss limit closes existing positions — agents/risk_manager.py **(BLOCKING demo)**
-- Currency conversion GBP/USD at trade close — agents/risk_manager.py **(BLOCKING demo)**
-- Position reconciliation on startup — read open OANDA trades on bot restart **(BLOCKING demo)**
 - Reconnection/retry logic for OANDA disconnections (not blocking demo)
+
+### Phase 2 Fixes Applied (2026-04-08)
+✅ FX conversion helper `data/fx.py` — reads last GBPUSD candle from DB (1h→4h→1d→15m fallback), converts quote-currency P&L to GBP
+✅ `risk_manager.close_position` — applies `to_gbp()` using asset.quote_currency before updating capital/daily/weekly P&L
+✅ Daily loss limit force-closes — `daily_limit_breached()` + `update_positions()` closes open positions at current price when breached, not just blocks new entries
+✅ Startup reconciliation — `pipeline._reconcile_open_positions()` pulls OANDA open trades, rebuilds risk_mgr.open_positions + executor.oanda_trade_map from DB via oanda_trade_id; marks DB-open-but-OANDA-missing rows closed; logs OANDA orphans
+✅ LearnerAgent frozen — `LearnerAgent(frozen=True)` default; skips `_optimize_parameters` and param mutation during demo
+✅ Smoke test: `fetch` + `analyze` run clean on 2026-04-08 (no signals, ranging EURUSD — expected)
 
 ### Backtest Results (2023-2026, EURUSD, corrected interpretation)
 | Metric | ATR SL (score≥0.60) | ATR SL (score≥0.65) | Structure SL |
@@ -436,18 +441,23 @@ Behaviour:
 ### ✅ Phase 1 — Core bugs fixed (COMPLETE)
 All 16 items above done.
 
-### Phase 2 — Demo unblocking (next session, ~1 hour)
-1. Daily loss limit closes positions
-2. GBP/USD currency conversion
-3. Position reconciliation on startup
-4. Freeze LearnerAgent
-5. Run `python main.py run` — confirm first trade executes on OANDA practice
+### ✅ Phase 2 — Demo unblocking (COMPLETE 2026-04-08)
+1. ✅ Daily loss limit closes positions
+2. ✅ GBP/USD currency conversion (via DB GBPUSD rate, not OANDA pricing API)
+3. ✅ Position reconciliation on startup
+4. ✅ Freeze LearnerAgent
+5. ⏳ `python main.py run` live-loop smoke test — deferred, will run on PC
 
-### Phase 3 — Email + Approval system (1 session)
-1. `notifications/email_reporter.py`
-2. `notifications/report_builder.py`
-3. `notifications/approval_handler.py` (FastAPI routes)
-4. Test with manual trigger
+### ✅ Phase 3 — Email + Approval system (COMPLETE 2026-04-08)
+1. ✅ Shared `email_utils` package created one dir up (`../email_utils`), installed editable — reusable across projects
+2. ✅ `notifications/email_reporter.py` — thin wrapper, loads `GMAIL_USER`/`GMAIL_APP_PASSWORD`/`REPORT_TO_EMAIL` from `.env`
+3. ✅ `notifications/report_builder.py` — assembles daily report; real sections (status, today's trading, open positions, weekly summary), stub sections for research/code-review/readiness (Phases 4–6)
+4. ✅ `notifications/approval_handler.py` — FastAPI `/approve/{kind}/{id}`, `/reject/{kind}/{id}`, `/api/approvals`; idempotent, persists to `reports/approvals.json`
+5. ✅ Routes mounted into `dashboard/app.py`
+6. ✅ `scheduler/email_report_job.py` — entry point for Task Scheduler 19:00 UTC job
+7. ✅ `.env.example` updated with Gmail placeholders
+8. ✅ Manual end-to-end test passed: report sent successfully to Sameer.Chandna@gmail.com (2026-04-08)
+9. ⏳ Windows Task Scheduler registration — deferred until all phases done
 
 ### Phase 4 — Research pipeline (2 sessions)
 1. `research/parameter_agent.py`
