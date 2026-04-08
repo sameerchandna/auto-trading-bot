@@ -37,6 +37,7 @@ class BacktestEngine:
         initial_capital: float = 10_000,
         config: BacktestConfig | None = None,
         pair: str = "EURUSD",
+        params_override: dict | None = None,
     ):
         self.start_date = start_date
         self.end_date = end_date
@@ -44,7 +45,9 @@ class BacktestEngine:
         self.config = config or BASELINE
         self.pair = pair
         self.asset = get_asset(pair)
-        self.params = load_strategy_params()
+        # params_override allows the research pipeline to test candidates
+        # without mutating optimized_params.json on disk.
+        self.params = params_override if params_override is not None else load_strategy_params()
         self.risk_mgr = RiskManagerAgent()
         self.risk_mgr.capital = initial_capital
 

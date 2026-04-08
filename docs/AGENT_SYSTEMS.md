@@ -168,29 +168,93 @@ reports candidates. You approve promotion to `params.json`.
 - **08:00 UTC** — Research loop runs (after data fetch at 06:00)
 - **09:00 UTC** — Results in report alongside code review
 
-### Overfitting Protection — Rotating Window Design
+### Overfitting Protection — Walk-Forward + Rotating Windows + OOS Gate
+
+Three layers of defence, in order of strength:
+
+**Layer 1 — Non-overlapping walk-forward within a run (primary defence)**
+
+Instead of one fixed IS/VAL split, every candidate is tested across multiple
+**non-overlapping** windows of the available history. No data point appears in
+more than one window's IS or VAL — each window is a genuinely independent test:
 
 ```
-Year A (In-Sample)  → parameter search
-Year B (Validation) → confirm winners generalise
-Year C (Out-of-Sample) → never touched during search
-                         only used for manual spot checks
-                         every 3 months
-
-Rotation (quarterly):
-Q1 2026: In-Sample=2023, Validation=2024, OOS=2025
-Q2 2026: In-Sample=2024, Validation=2025, OOS=2023
-Q3 2026: In-Sample=2025, Validation=2024, OOS=2023+2026H1
+Window 1: IS = 2023 H1   VAL = 2023 H2
+Window 2: IS = 2024 H1   VAL = 2024 H2
+Window 3: IS = 2025 H1   VAL = 2025 H2
+Window 4: IS = 2026 H1   VAL = 2026 H2 (when available)
 ```
 
-This prevents regime dependency — a parameter set must work across 
-different years (different volatility regimes, trends, ranging periods).
+A candidate must pass VAL on **at least 75% of windows** (3 of 4) to survive.
+Because windows are non-overlapping, "pass 3 of 4" means 3 truly independent
+tests, not 3 correlated slices of the same period.
+
+**Layer 2 — Quarterly rotation (regime diversity)**
+
+The OOS year still rotates quarterly so the "untouched" year changes:
+
+```
+Q1 2026: walk-forward across 2023–2024, OOS = 2025
+Q2 2026: walk-forward across 2024–2025, OOS = 2023
+Q3 2026: walk-forward across 2025–2026H1, OOS = 2023
+```
+
+This guarantees that whichever year was the "held-out" reference rotates out
+of memory regularly, so a param set has to work in genuinely different macro
+regimes — not just the one it was tuned on.
+
+**Layer 3 — Mandatory OOS gate before promotion (final filter)**
+
+Any candidate that passes walk-forward is automatically run once on the
+current OOS year before being marked `PROMOTED_CANDIDATE`:
+
+- OOS profit factor degrades > 25% vs walk-forward median → downgraded to
+  `FLAGGED_NEEDS_MANUAL_REVIEW` (not auto-promoted, surfaced in email for
+  manual decision)
+- OOS trades < 30 → `FLAGGED_INSUFFICIENT_OOS_SAMPLE`
+- OOS passes → `PROMOTED_CANDIDATE` recommended in email
+
+This costs one extra backtest per survivor but closes the biggest hole: a
+param set that looks good on walk-forward but falls apart on truly unseen data.
 
 ### Overfit Rejection Rules
-- Trades < 50 in sample → result rejected (insufficient sample)
-- In-sample improvement > 30% vs baseline → flagged as suspicious, needs manual review
-- Validation degrades > 20% vs in-sample on profit factor → rejected as overfit
-- Any parameter at its PARAM_BOUNDS limit → flagged (hitting the wall = likely overfit)
+- Trades < 50 per window → that window result rejected
+- Candidate must pass VAL on ≥75% of non-overlapping walk-forward windows → else rejected
+- Walk-forward median improvement > 30% vs baseline → flagged suspicious
+- Any param at its PARAM_BOUNDS edge → flagged (hitting the wall = likely overfit)
+- OOS PF degrades > 25% vs walk-forward median → downgraded, not auto-promoted
+- OOS trades < 30 → flagged insufficient sample
+
+### Multi-Metric Promotion Gate
+A candidate cannot be promoted on profit factor alone. To reach
+`PROMOTED_CANDIDATE`, it must satisfy **all** of:
+- Profit factor improves vs both baselines (rolling + anchor)
+- Win rate degrades by no more than 10% (relative) vs both baselines
+- Max drawdown degrades by no more than 10% (relative) vs both baselines
+- Expectancy (pips/trade) does not turn negative
+
+This prevents single-metric gaming (e.g. 2 huge wins + 50 small losses
+producing great PF but a fragile strategy).
+
+### Dual Baseline (Anchor + Rolling)
+Two baselines are kept side by side:
+- **Anchor baseline** — immutable reference (locked at 2026-04-02 production
+  config: ATR SL, threshold 0.60). Only updated manually, at most quarterly.
+- **Rolling baseline** — current `optimized_params.json`, updates each time
+  you approve a promotion.
+
+Every candidate must beat **both** to be promoted. This stops baseline drift:
+after 5 promotions you're not silently comparing against an already-overfit
+baseline — the anchor keeps you honest.
+
+### Daily Test Budget (revised)
+- **Max 5 combinations per day** (down from 20). Lower budget = fewer shots
+  at the multiple-comparisons problem (~7,300 tests/year at 20/day produces
+  ~365 false positives by chance alone; 5/day cuts that to ~90).
+- Prioritise params not tested in last 7 days
+- Never test more than 2 structural params in same run
+- Track total combinations tested per quarterly window — if >500, escalate
+  the promotion bar (require PF improvement >15% instead of >0%)
 
 ### Parameters to Test (from `settings.py` PARAM_BOUNDS)
 
@@ -215,9 +279,8 @@ different years (different volatility regimes, trends, ranging periods).
 - `cooldown_after_losses`: 0–5
 
 ### Daily Test Budget
-- Max 20 combinations per day (prevents exhaustive curve fitting)
-- Prioritise params not tested in last 7 days
-- Never test more than 3 structural params in same run
+See revised budget under "Daily Test Budget (revised)" above — capped at
+**5 combinations/day**, not 20.
 
 ### Pipeline Flow
 ```
@@ -459,13 +522,34 @@ All 16 items above done.
 8. ✅ Manual end-to-end test passed: report sent successfully to Sameer.Chandna@gmail.com (2026-04-08)
 9. ⏳ Windows Task Scheduler registration — deferred until all phases done
 
-### Phase 4 — Research pipeline (2 sessions)
-1. `research/parameter_agent.py`
-2. `research/backtest_runner.py`
-3. `research/validation_agent.py`
-4. `research/test_history.json` schema
-5. `scheduler/research_job.py`
-6. End-to-end test run
+### ✅ Phase 4 — Research pipeline (COMPLETE 2026-04-09)
+1. ✅ `research/test_history.json` — schema with anchor + rolling baselines, non-overlapping walk-forward windows (2023/2024/2025 H1→H2), OOS=2026 YTD, budget cap
+2. ✅ `research/history.py` — load/save, stable param hashing (sha1), 30-day blacklist, dedupe, rolling baseline sync, test ID generation
+3. ✅ `research/parameter_agent.py` — single-step mutations from rolling baseline, 5/day budget cap, max 2 structural mutations per run, dedupe vs history + blacklist + baselines
+4. ✅ `research/backtest_runner.py` — runs each candidate across all walk-forward windows + OOS gate; window passes if val PF > baseline PF and trades ≥ 50; uses `params_override` so optimized_params.json is never mutated mid-run
+5. ✅ `research/validation_agent.py` — multi-metric promotion gate (PF + win rate + drawdown + expectancy) vs both anchor and rolling baselines, OOS degradation check, escalation rule >500 tests/quarter, all 10 verdicts unit-tested
+6. ✅ `research/promotion.py` — `apply_decisions()` reads approvals.json, writes approved params to optimized_params.json, blacklists rejected hashes, **auto-runs PineScript generator** so BT/Pine stay in sync; `push_promotion()` adds promoted candidates to approvals.json `pending`
+7. ✅ `backtest/engine.py` — added `params_override` parameter (non-breaking)
+8. ✅ `notifications/report_builder.py` — real research section reads test_history.json (counts of promoted/flagged/rejected, candidate list), tolerant approval loader
+9. ✅ `scheduler/research_job.py` — entry point: applies prior decisions → generates candidates → runs batch → evaluates → records to history → writes daily report → pushes promotions to approvals
+10. ✅ End-to-end test (2 candidates, 6 backtests across 3 windows): both REJECTED_WALK_FORWARD as expected (current baseline PF 1.34 hard to beat with single-step mutations — gates working)
+11. ✅ Approval round-trip test: synthetic promoted entry → push to pending → approve → apply_decisions → optimized_params.json updated → rolling baseline resynced
+
+**Overfitting protection in place:**
+- Layer 1 — Non-overlapping walk-forward (3 H1/H2 windows), must pass ≥75%
+- Layer 2 — Quarterly rotation of OOS year
+- Layer 3 — Mandatory OOS gate before promotion (>25% PF drop downgrades to FLAGGED_NEEDS_MANUAL_REVIEW)
+- Multi-metric gate prevents single-metric (PF) gaming
+- Dual baseline (immutable anchor + rolling) prevents baseline drift
+- 5 combos/day cap (down from 20) limits multiple-comparisons exposure
+- Escalation rule: >500 tests/quarter requires +15% PF improvement instead of any improvement
+
+**Deferred (not blocking Phase 4):**
+- Multi-asset validation — waits on Phase 2 multi-asset rollout
+- Regime labelling per window
+- Per-report approval token (Phase 7 dashboard work)
+- Auto-rollback on bad promotion (Phase 7 dashboard work)
+- Windows Task Scheduler registration (deferred until all phases done)
 
 ### Phase 5 — Code review pipeline (1 session)
 1. `REVIEW_RULES.md` finalised

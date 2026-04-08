@@ -67,8 +67,13 @@ def _load_pending_approvals() -> list[PendingApproval]:
     out = []
     for item in data.get("pending", []):
         try:
-            out.append(PendingApproval(**item))
-        except TypeError:
+            out.append(PendingApproval(
+                id=item["id"],
+                kind=item["kind"],
+                title=item["title"],
+                details=item["details"],
+            ))
+        except (KeyError, TypeError):
             logger.warning(f"Skipping malformed approval entry: {item}")
     return out
 
@@ -192,11 +197,51 @@ def _section_trading(status: dict) -> str:
     return "\n".join(lines)
 
 
-def _section_research_stub() -> str:
-    return (
-        f"{RULE}\nRESEARCH\n{RULE}\n"
-        "Research pipeline not yet implemented (Phase 4).\n"
-    )
+def _section_research() -> str:
+    """Read research/test_history.json and summarise the most recent run."""
+    history_file = REPO_ROOT / "research" / "test_history.json"
+    if not history_file.exists():
+        return f"{RULE}\nRESEARCH\n{RULE}\nNo research history yet.\n"
+    try:
+        data = json.loads(history_file.read_text())
+    except json.JSONDecodeError:
+        return f"{RULE}\nRESEARCH\n{RULE}\ntest_history.json malformed.\n"
+
+    tests = data.get("tests", [])
+    if not tests:
+        return f"{RULE}\nRESEARCH\n{RULE}\nNo tests run yet.\n"
+
+    today = datetime.utcnow().strftime("%Y-%m-%d")
+    todays = [t for t in tests if t.get("tested_at", "").startswith(today)]
+    sample = todays if todays else tests[-5:]
+    label = "today" if todays else "most recent 5"
+
+    promoted = sum(1 for t in sample if t.get("verdict") == "PROMOTED_CANDIDATE")
+    flagged = sum(1 for t in sample if (t.get("verdict") or "").startswith("FLAGGED"))
+    rejected = sum(1 for t in sample if (t.get("verdict") or "").startswith("REJECTED"))
+
+    lines = [
+        RULE, "RESEARCH", RULE,
+        f"Tested ({label}): {len(sample)}  |  "
+        f"Promoted: {promoted}  Flagged: {flagged}  Rejected: {rejected}",
+        f"Tests this quarter: {data.get('budget', {}).get('tests_this_quarter', 0)}"
+        f" / escalation at {data.get('budget', {}).get('escalate_bar_after', 500)}",
+        "",
+    ]
+    if promoted:
+        lines.append("Promotion candidates (see ACTIONS NEEDED above):")
+        for t in sample:
+            if t.get("verdict") != "PROMOTED_CANDIDATE":
+                continue
+            ap = t.get("approval") or {}
+            agg = t.get("aggregate") or {}
+            lines.append(
+                f"  {ap.get('approval_id', '?')} {t.get('mutation', '')} — "
+                f"PF {agg.get('median_profit_factor', 0):.2f}"
+            )
+    else:
+        lines.append("No promotion candidates this run.")
+    return "\n".join(lines)
 
 
 def _section_code_review_stub() -> str:
@@ -233,7 +278,7 @@ def build_report() -> tuple[str, str, str]:
         _section_actions(approvals),
         _section_status(status),
         _section_trading(status),
-        _section_research_stub(),
+        _section_research(),
         _section_code_review_stub(),
         _section_readiness_stub(),
         f"{RULE}\nFull dashboard: {DASH_BASE}/\n{RULE}",
