@@ -244,19 +244,84 @@ def _section_research() -> str:
     return "\n".join(lines)
 
 
-def _section_code_review_stub() -> str:
-    return (
-        f"{RULE}\nCODE REVIEW\n{RULE}\n"
-        "Code review pipeline not yet implemented (Phase 5).\n"
-    )
+def _section_code_review() -> str:
+    """Read the most recent reports/code_review/*.md and summarise it."""
+    cr_dir = REPO_ROOT / "reports" / "code_review"
+    if not cr_dir.exists():
+        return f"{RULE}\nCODE REVIEW\n{RULE}\nNo code review runs yet.\n"
+    reports = sorted(cr_dir.glob("*.md"))
+    if not reports:
+        return f"{RULE}\nCODE REVIEW\n{RULE}\nNo code review runs yet.\n"
+    latest = reports[-1]
+    text = latest.read_text(encoding="utf-8")
+
+    # Pull the "Findings:" header line if present.
+    summary_line = ""
+    for line in text.splitlines():
+        if line.startswith("Findings:"):
+            summary_line = line.strip()
+            break
+
+    # Count code-kind pending approvals to surface action count.
+    code_pending = 0
+    if APPROVALS_FILE.exists():
+        try:
+            data = json.loads(APPROVALS_FILE.read_text())
+            code_pending = sum(
+                1 for e in data.get("pending", []) if e.get("kind") == "code"
+            )
+        except json.JSONDecodeError:
+            pass
+
+    lines = [
+        RULE, "CODE REVIEW", RULE,
+        f"Last run: {latest.stem}",
+    ]
+    if summary_line:
+        lines.append(summary_line)
+    lines.append(f"Pending fixes awaiting approval: {code_pending}")
+    if code_pending:
+        lines.append("(See ACTIONS NEEDED above for details.)")
+    lines.append(f"Full report: {DASH_BASE}/reports/code_review/{latest.name}")
+    return "\n".join(lines)
 
 
-def _section_readiness_stub() -> str:
-    return (
-        f"{RULE}\nREADINESS STATUS\n{RULE}\n"
-        "Demo:  🟡 checks pending (ReadinessAgent — Phase 6)\n"
-        "Live:  🔴 Not ready (demo required first)\n"
-    )
+def _section_readiness() -> str:
+    """Run ReadinessAgent and produce a daily traffic-light section.
+
+    Also archives a daily Markdown snapshot to reports/readiness/.
+    """
+    try:
+        from agents.readiness_agent import run as run_readiness, write_snapshot
+    except Exception as exc:
+        return f"{RULE}\nREADINESS STATUS\n{RULE}\nReadinessAgent unavailable: {exc}\n"
+    try:
+        report = run_readiness()
+        snapshot = write_snapshot(report)
+    except Exception as exc:
+        logger.exception("readiness run failed")
+        return f"{RULE}\nREADINESS STATUS\n{RULE}\nReadinessAgent error: {exc}\n"
+
+    lines = [
+        RULE, "READINESS STATUS", RULE,
+        f"Demo:  {report.demo_status}  {report.demo_pass_count}/{len(report.demo)} checks passing",
+        f"Live:  {report.live_status}  {report.live_pass_count}/{len(report.live)} checks passing",
+        "",
+    ]
+    failing_demo = [c for c in report.demo if not c.passed]
+    if failing_demo:
+        lines.append("Demo blockers:")
+        for c in failing_demo:
+            lines.append(f"  ❌ {c.id} {c.label} — {c.detail}")
+    if report.demo_pass_count == len(report.demo):
+        failing_live = [c for c in report.live if not c.passed]
+        if failing_live:
+            lines.append("Live blockers:")
+            for c in failing_live:
+                lines.append(f"  ❌ {c.id} {c.label} — {c.detail}")
+    lines.append("")
+    lines.append(f"Snapshot: {snapshot.name}")
+    return "\n".join(lines)
 
 
 def build_report() -> tuple[str, str, str]:
@@ -279,8 +344,8 @@ def build_report() -> tuple[str, str, str]:
         _section_status(status),
         _section_trading(status),
         _section_research(),
-        _section_code_review_stub(),
-        _section_readiness_stub(),
+        _section_code_review(),
+        _section_readiness(),
         f"{RULE}\nFull dashboard: {DASH_BASE}/\n{RULE}",
     ]
     body_text = "\n\n".join(sections)

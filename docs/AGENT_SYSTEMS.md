@@ -551,18 +551,31 @@ All 16 items above done.
 - Auto-rollback on bad promotion (Phase 7 dashboard work)
 - Windows Task Scheduler registration (deferred until all phases done)
 
-### Phase 5 — Code review pipeline (1 session)
-1. `REVIEW_RULES.md` finalised
-2. `agents/review_agent.py`
-3. `agents/fix_agent.py`
-4. `scheduler/code_review_job.py`
-5. End-to-end test run
+### ✅ Phase 5 — Code review pipeline (COMPLETE 2026-04-09)
+1. ✅ `REVIEW_RULES.md` at repo root — full rule spec (CRITICAL/WARNING/SUGGESTION)
+2. ✅ `agents/review_agent.py` — AST + regex scanner over `agents/`, `analysis/`, `backtest/`, `engine/`, `data/`. Stable per-finding hash (rule_id + file + symbol). Automated checks: WR-001 (N+1 session calls in for-loops), WR-002 (TF literals outside config/), WR-004 (bare except / `except Exception: pass`), SG-001 (missing type hints on public funcs), SG-002 (>60-line funcs), SG-003 (missing docstrings)
+3. ✅ `agents/fix_agent.py` — Proposal wrapper with risk level (LOW/MEDIUM/HIGH per rule) + canned suggested-fix text per rule; writes `reports/code_review/YYYY-MM-DD.md`. Never edits source.
+4. ✅ `scheduler/code_review_job.py` — entry point: `apply_code_decisions()` drains prior approve/reject (approved logged only, rejected → `reports/rejected_fixes.json` blacklist), scans, filters rejected hashes, writes report, pushes top 5 CRITICAL/WARNING into `approvals.json` pending (kind=`code`). Idempotent across reruns via `finding_hash` dedupe.
+5. ✅ `notifications/report_builder.py` — `_section_code_review()` replaces stub; reads latest report, surfaces pending code-fix count
+6. ✅ End-to-end test on current repo: 83 findings (0 CRIT, 32 WARN, 51 SUG), 5 pushed to approvals (all WR-002 in analysis/confluence.py); rerun pushed 0 (dedupe verified)
 
-### Phase 6 — ReadinessAgent (1 session)
-1. `agents/readiness_agent.py`
-2. `reports/readiness/checklist.json` — define demo + live checklists
-3. Wire into Sunday email report
-4. End-to-end test run
+**Deferred (not blocking Phase 5):**
+- CRITICAL rules (CR-001…006) and WR-003/005/006 need semantic understanding — left as spec in REVIEW_RULES.md for future LLM-backed iteration
+- Auto-application of approved code fixes (would need an LLM editor) — currently logs only, user applies manually
+- SG-004 unused imports (would need pyflakes dep), SG-005 test coverage gaps
+- Windows Task Scheduler registration (deferred until all phases done)
+
+### ✅ Phase 6 — ReadinessAgent (COMPLETE 2026-04-09)
+1. ✅ `reports/readiness/checklist.json` — 8 demo + 6 live checks; pluggable evaluators by name; `manual` block for human-only flags (review done, capital signoff)
+2. ✅ `agents/readiness_agent.py` — `CHECK_EVALUATORS` registry, reads anchor metrics from `test_history.json`, closed live PositionRecord rows from DB, code presence checks; returns `ReadinessReport` with 🔴/🟡/🟢 status; `write_snapshot()` archives daily Markdown to `reports/readiness/YYYY-MM-DD.md`
+3. ✅ **Daily cadence (not Sunday-only)** — `notifications/report_builder.py:_section_readiness()` runs every report. Cheap (pure reads, no backtest), so user sees blockers shift the moment a check flips.
+4. ✅ End-to-end test: Demo 🟡 6/8 (blocked on DM-03 backtest DD 46.2% vs 20% target, DM-08 no live trades yet); Live 🔴 0/6 (gated on demo)
+
+**Two real blockers surfaced for go-live:**
+- DM-03 — backtest max drawdown 46.2% must drop to ≤20% (research agent's job, or accept higher target)
+- DM-08 / LV-02-04 — needs ≥20 live demo trades; auto-fills once `python main.py run` starts hitting OANDA practice
+
+LV-05 manual review and LV-06 capital signoff are toggled in `reports/readiness/checklist.json` `manual` block.
 
 ### Phase 7 — Dashboard integration (1 session)
 1. Add pending approvals panel to existing dashboard
