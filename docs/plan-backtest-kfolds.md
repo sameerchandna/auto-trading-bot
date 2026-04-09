@@ -1,5 +1,10 @@
 # Plan: `backtest-folds` — Walk-Forward Multi-Fold Backtest Command
 
+## Status
+- **Phase 1: SHIPPED** (commit `c7f32fa`, 2026-04-09). Command live, tests green, smoke + parallel + kfold_shuffled runs verified against a single-range BT over the same window. Saved as `backtest_folds_runs` id 1/2/3. Parallel wall time ~36s vs single-range ~111s. Headline on EURUSD baseline post overfitting-fix: 11/13 complete quarters profitable, Sharpe mean 1.87, combined OOS £61.5k on £10k (PF 1.35, DD 13.7%).
+- **Phase 2: TODO** — fit-on-IS / test-on-OOS (Optuna per fold) reusing the same splitter + aggregator.
+- **Dashboard UI for fold runs: TODO** — schema ready, not wired.
+
 ## Context
 
 Backtest engine was recently patched for overfitting bugs (commit `e33c8cb`: lookahead removed, daily-resampled Sharpe/Sortino, fixed drawdown, live learner paused). All prior single-range backtest numbers are no longer comparable.
