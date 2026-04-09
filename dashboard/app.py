@@ -343,7 +343,7 @@ async def get_backtests(pair: str = ""):
             params = json.loads(r.params_json) if r.params_json else {}
             metrics = json.loads(r.results_json) if r.results_json else {}
 
-            # Build a compact config label: flag-label (if any) + params fingerprint
+            # Build a compact config label: readable knobs + hash of full params
             cfg_label = params.get("config", "baseline")
             thr = params.get("threshold")
             slm = params.get("sl_multiplier")
@@ -355,11 +355,24 @@ async def get_backtests(pair: str = ""):
                 parts.append(f"SL{slm:.1f}")
             if tpr is not None:
                 parts.append(f"TP{tpr:.1f}")
-            fingerprint = " ".join(parts)
+            readable = " ".join(parts)
+
+            # Hash the full param dict (weights included) — de-dupe aid only
+            fp_hash = ""
+            if thr is not None or params.get("weights"):
+                import hashlib as _hl
+                fp_src = json.dumps(
+                    {k: params.get(k) for k in
+                     ("threshold", "sl_multiplier", "tp_risk_reward", "swing_lookback", "weights")},
+                    sort_keys=True, default=str,
+                )
+                fp_hash = _hl.sha1(fp_src.encode()).hexdigest()[:6]
+
+            tagged = f"{readable} [{fp_hash}]" if fp_hash and readable else (readable or "baseline")
             if cfg_label and cfg_label != "baseline":
-                config_display = f"{fingerprint} +{cfg_label}" if fingerprint else cfg_label
+                config_display = f"{tagged} +{cfg_label}"
             else:
-                config_display = fingerprint or "baseline"
+                config_display = tagged
 
             result.append({
                 "id": r.id,

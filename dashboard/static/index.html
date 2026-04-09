@@ -227,9 +227,17 @@
         <!-- Backtests -->
         <section id="backtest" class="tab-content">
             <div class="card full-width">
-                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
                     <h3 style="margin:0">Backtest Results</h3>
                     <span id="bt-pair-filter" style="display:inline-flex;gap:4px"></span>
+                </div>
+                <div style="font-size:11px;color:#64748b;margin-bottom:10px;line-height:1.6">
+                    <b>Config legend:</b>
+                    <code>thr</code> confluence threshold (higher = pickier) ·
+                    <code>SL</code> stop-loss ATR multiplier (higher = wider stop) ·
+                    <code>TP</code> take-profit R:R (higher = bigger targets) ·
+                    <code>[abc123]</code> 6-char hash of full param set (weights too) — same hash = identical config ·
+                    <code>+&lt;flag&gt;</code> extra CLI filters like <code>no-overlap</code>, <code>block-hN</code>
                 </div>
                 <table id="backtest-table">
                     <thead>
