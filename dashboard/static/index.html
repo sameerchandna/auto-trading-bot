@@ -26,6 +26,7 @@
         <button class="tab" data-tab="trades">Trades</button>
         <button class="tab" data-tab="chart">Chart</button>
         <button class="tab" data-tab="backtest">Backtests</button>
+        <button class="tab" data-tab="research">Research</button>
         <button class="tab" data-tab="compare">Comparisons</button>
         <button class="tab" data-tab="learning">Learning</button>
         <button class="tab" data-tab="data">Data</button>
@@ -134,6 +135,34 @@
                         </tr>
                     </thead>
                     <tbody id="backtest-body"></tbody>
+                </table>
+            </div>
+        </section>
+
+        <!-- Research -->
+        <section id="research" class="tab-content">
+            <div class="card full-width">
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px">
+                    <h3 style="margin:0">Research Agent — Parameter Sweep History</h3>
+                    <span id="research-baselines" style="font-size:12px;color:#94a3b8"></span>
+                </div>
+                <div id="research-budget" style="font-size:12px;color:#64748b;margin-bottom:8px"></div>
+                <table id="research-table">
+                    <thead>
+                        <tr>
+                            <th>ID</th>
+                            <th>Tested</th>
+                            <th>Mutation</th>
+                            <th>Median PF</th>
+                            <th>Median WR</th>
+                            <th>Median DD</th>
+                            <th>Pass</th>
+                            <th>OOS PF</th>
+                            <th>Verdict</th>
+                            <th>Reason</th>
+                        </tr>
+                    </thead>
+                    <tbody id="research-body"></tbody>
                 </table>
             </div>
         </section>

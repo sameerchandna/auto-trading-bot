@@ -220,14 +220,52 @@ def _section_research() -> str:
     flagged = sum(1 for t in sample if (t.get("verdict") or "").startswith("FLAGGED"))
     rejected = sum(1 for t in sample if (t.get("verdict") or "").startswith("REJECTED"))
 
+    anchor = (data.get("anchor_baseline") or {}).get("metrics") or {}
+    rolling_metrics = (data.get("rolling_baseline") or {}).get("metrics") or {}
+
     lines = [
         RULE, "RESEARCH", RULE,
         f"Tested ({label}): {len(sample)}  |  "
         f"Promoted: {promoted}  Flagged: {flagged}  Rejected: {rejected}",
         f"Tests this quarter: {data.get('budget', {}).get('tests_this_quarter', 0)}"
         f" / escalation at {data.get('budget', {}).get('escalate_bar_after', 500)}",
-        "",
     ]
+    if anchor:
+        lines.append(
+            f"Anchor baseline: PF {anchor.get('profit_factor', 0):.2f}  "
+            f"WR {anchor.get('win_rate', 0):.1%}  "
+            f"DD {anchor.get('max_drawdown_pct', 0):.1%}  "
+            f"trades {anchor.get('trades', 0)}"
+        )
+    if rolling_metrics:
+        lines.append(
+            f"Rolling baseline: PF {rolling_metrics.get('profit_factor', 0):.2f}  "
+            f"WR {rolling_metrics.get('win_rate', 0):.1%}  "
+            f"DD {rolling_metrics.get('max_drawdown_pct', 0):.1%}"
+        )
+    lines.append("")
+
+    if sample:
+        lines.append("Candidates:")
+        lines.append("  ID    Mutation                            PF    WR    DD    Pass  Verdict")
+        for t in sample:
+            agg = t.get("aggregate") or {}
+            pass_rate = t.get("walk_forward_pass_rate") or 0
+            verdict = (t.get("verdict") or "?").replace("_", " ")
+            mutation = (t.get("mutation") or "")[:34].ljust(34)
+            test_id = (t.get("id") or "")[-6:]
+            lines.append(
+                f"  {test_id:<6}{mutation}  "
+                f"{agg.get('median_profit_factor', 0):>4.2f}  "
+                f"{agg.get('median_win_rate', 0):>4.0%}  "
+                f"{agg.get('median_max_drawdown_pct', 0):>4.0%}  "
+                f"{pass_rate:>3.0%}   {verdict}"
+            )
+            reason = t.get("verdict_reason")
+            if reason and t.get("verdict", "").startswith(("REJECTED", "FLAGGED")):
+                lines.append(f"         → {reason[:90]}")
+        lines.append("")
+
     if promoted:
         lines.append("Promotion candidates (see ACTIONS NEEDED above):")
         for t in sample:
@@ -239,8 +277,7 @@ def _section_research() -> str:
                 f"  {ap.get('approval_id', '?')} {t.get('mutation', '')} — "
                 f"PF {agg.get('median_profit_factor', 0):.2f}"
             )
-    else:
-        lines.append("No promotion candidates this run.")
+    lines.append(f"Full research history: {DASH_BASE}/#research")
     return "\n".join(lines)
 
 

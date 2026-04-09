@@ -69,6 +69,7 @@ function loadTabData(tab) {
         case 'trades': populateTradeFilter().then(loadTrades); break;
         case 'chart': setTimeout(loadChart, 50); break;
         case 'backtest': loadBacktests(); break;
+        case 'research': loadResearch(); break;
         case 'compare': loadComparisons(); break;
         case 'learning': loadLearning(); break;
         case 'data': loadDataHealth(); break;
@@ -508,6 +509,70 @@ async function loadBacktests() {
         document.getElementById('backtest-body').innerHTML = html || '<tr><td colspan="11" class="neutral">No backtests yet. Run: python main.py backtest</td></tr>';
     } catch(e) {
         console.error('Backtests load failed:', e);
+    }
+}
+
+// Research tab — reads research/test_history.json via /api/research
+async function loadResearch() {
+    try {
+        const res = await fetch(`${API}/api/research`);
+        const data = await res.json();
+        if (data.error) {
+            document.getElementById('research-body').innerHTML =
+                `<tr><td colspan="10" class="negative">${data.error}</td></tr>`;
+            return;
+        }
+
+        const anchor = (data.baselines && data.baselines.anchor) || {};
+        const rolling = (data.baselines && data.baselines.rolling) || {};
+        const pctA = v => (v == null ? '-' : (v * 100).toFixed(1) + '%');
+        let baselineHtml = '';
+        if (anchor.profit_factor != null) {
+            baselineHtml += `Anchor: PF ${anchor.profit_factor.toFixed(2)} · WR ${pctA(anchor.win_rate)} · DD ${pctA(anchor.max_drawdown_pct)} · ${anchor.trades} trades`;
+        }
+        if (rolling.profit_factor != null) {
+            baselineHtml += ` &nbsp;|&nbsp; Rolling: PF ${rolling.profit_factor.toFixed(2)} · WR ${pctA(rolling.win_rate)} · DD ${pctA(rolling.max_drawdown_pct)}`;
+        }
+        document.getElementById('research-baselines').innerHTML = baselineHtml || 'No baseline set';
+
+        const b = data.budget || {};
+        document.getElementById('research-budget').textContent =
+            `Tests this quarter: ${b.tests_this_quarter || 0} / escalation at ${b.escalate_bar_after || 500} · Daily cap: ${b.daily_cap || 5}`;
+
+        const tests = data.tests || [];
+        let html = '';
+        for (const t of tests) {
+            const verdict = t.verdict || '?';
+            let vClass = 'neutral';
+            if (verdict === 'PROMOTED_CANDIDATE') vClass = 'positive';
+            else if (verdict.startsWith('REJECTED')) vClass = 'negative';
+            else if (verdict.startsWith('FLAGGED')) vClass = 'neutral';
+
+            const pct = v => (v == null ? '-' : (v * 100).toFixed(0) + '%');
+            const pf = v => (v == null ? '-' : v.toFixed(2));
+            const tested = t.tested_at ? new Date(t.tested_at).toLocaleString() : '-';
+            const oosPf = t.oos_profit_factor == null ? '-' : t.oos_profit_factor.toFixed(2);
+            const reason = (t.verdict_reason || '').replace(/</g, '&lt;');
+
+            html += `<tr>
+                <td title="${t.params_hash || ''}">${t.id || '-'}</td>
+                <td>${tested}</td>
+                <td>${t.mutation || '-'}</td>
+                <td>${pf(t.median_profit_factor)}</td>
+                <td>${pct(t.median_win_rate)}</td>
+                <td>${pct(t.median_max_drawdown_pct)}</td>
+                <td>${pct(t.walk_forward_pass_rate)}</td>
+                <td>${oosPf}</td>
+                <td class="${vClass}">${verdict.replace(/_/g, ' ')}</td>
+                <td style="font-size:11px;color:#64748b">${reason}</td>
+            </tr>`;
+        }
+        document.getElementById('research-body').innerHTML = html ||
+            '<tr><td colspan="10" class="neutral">No research runs yet. Run: python -m scheduler.research_job</td></tr>';
+    } catch(e) {
+        console.error('Research load failed:', e);
+        document.getElementById('research-body').innerHTML =
+            `<tr><td colspan="10" class="negative">Failed to load: ${e}</td></tr>`;
     }
 }
 

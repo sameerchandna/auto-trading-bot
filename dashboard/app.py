@@ -405,6 +405,66 @@ async def get_comparisons(pair: str = ""):
         session.close()
 
 
+@app.get("/api/research")
+async def get_research():
+    """Return research-agent history for the dashboard Research tab.
+
+    Reads research/test_history.json (written by scheduler/research_job.py).
+    Surfaces baselines, budget, and the 50 most recent test entries.
+    """
+    history_file = Path(__file__).parent.parent / "research" / "test_history.json"
+    if not history_file.exists():
+        return {"tests": [], "baselines": {}, "budget": {}}
+    try:
+        data = json.loads(history_file.read_text())
+    except json.JSONDecodeError as e:
+        return {"error": f"test_history.json malformed: {e}"}
+
+    tests = data.get("tests", [])[-50:]
+    slim = []
+    for t in reversed(tests):  # newest first
+        agg = t.get("aggregate") or {}
+        oos = t.get("oos") or {}
+        slim.append({
+            "id": t.get("id"),
+            "tested_at": t.get("tested_at"),
+            "mutation": t.get("mutation"),
+            "params_hash": t.get("params_hash"),
+            "verdict": t.get("verdict"),
+            "verdict_reason": t.get("verdict_reason"),
+            "walk_forward_pass_rate": t.get("walk_forward_pass_rate"),
+            "median_profit_factor": agg.get("median_profit_factor"),
+            "median_win_rate": agg.get("median_win_rate"),
+            "median_max_drawdown_pct": agg.get("median_max_drawdown_pct"),
+            "median_expectancy_pips": agg.get("median_expectancy_pips"),
+            "oos_trades": oos.get("trades"),
+            "oos_profit_factor": oos.get("profit_factor"),
+            "oos_win_rate": oos.get("win_rate"),
+            "windows": [
+                {
+                    "window_id": w.get("window_id"),
+                    "period": w.get("period"),
+                    "passed": w.get("passed"),
+                    "val_trades": (w.get("val") or {}).get("trades"),
+                    "val_profit_factor": (w.get("val") or {}).get("profit_factor"),
+                }
+                for w in (t.get("windows") or [])
+            ],
+            "approval": t.get("approval"),
+            "params": t.get("params"),
+        })
+
+    anchor = (data.get("anchor_baseline") or {}).get("metrics") or {}
+    rolling = (data.get("rolling_baseline") or {}).get("metrics") or {}
+    return {
+        "baselines": {"anchor": anchor, "rolling": rolling},
+        "budget": data.get("budget") or {},
+        "rotation": data.get("rotation") or {},
+        "tests": slim,
+        "last_updated": data.get("last_updated"),
+    }
+
+
 @app.get("/api/data-health")
 async def get_data_health():
     """Return candle counts and date ranges for all assets/timeframes."""

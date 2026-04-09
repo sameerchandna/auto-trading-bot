@@ -580,8 +580,9 @@ LV-05 manual review and LV-06 capital signoff are toggled in `reports/readiness/
 ### Phase 7 — Dashboard integration (1 session)
 1. Add pending approvals panel to existing dashboard
 2. Show readiness traffic light on dashboard home
-3. Show research history chart (param performance over time)
-4. Show code review history
+3. ✅ **Research tab (pulled forward 2026-04-09)** — `/api/research` reads `research/test_history.json`, new Research tab in `dashboard/static/index.html` + `app.js` shows every candidate (mutation, median PF/WR/DD, walk-forward pass rate, OOS PF, verdict, reason) plus anchor/rolling baselines and quarterly budget
+4. ✅ **Email research section beefed up (2026-04-09)** — now lists every candidate tested, not just promoted ones; shows anchor + rolling baselines; links to dashboard Research tab
+5. Show code review history panel
 
 ---
 
