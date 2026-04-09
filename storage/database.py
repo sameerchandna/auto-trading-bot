@@ -114,6 +114,25 @@ class BacktestRecord(Base):
     total_pnl = Column(Float, default=0.0)
     max_drawdown = Column(Float, default=0.0)
     sharpe_ratio = Column(Float, default=0.0)
+    fold_parent_id = Column(Integer, nullable=True, index=True)
+
+
+class BacktestFoldsRun(Base):
+    __tablename__ = "backtest_folds_runs"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    pair = Column(String(20), default="EURUSD")
+    scheme = Column(String(30), default="walkforward")
+    num_folds = Column(Integer, default=0)
+    start_date = Column(String(20), default="")
+    end_date = Column(String(20), default="")
+    params_json = Column(Text, default="{}")
+    summary_json = Column(Text, default="{}")
+    combined_metrics_json = Column(Text, default="{}")
+    combined_equity_curve_json = Column(Text, default="[]")
+    per_fold_json = Column(Text, default="[]")
+    label = Column(String(100), default="")
+    created_at = Column(DateTime, default=datetime.utcnow)
 
 
 # Engine and session factory
@@ -131,6 +150,9 @@ def _migrate_add_pair_columns():
     pos_cols = [row[1] for row in conn.execute("PRAGMA table_info(positions)").fetchall()]
     if "oanda_trade_id" not in pos_cols:
         conn.execute("ALTER TABLE positions ADD COLUMN oanda_trade_id VARCHAR(50)")
+    bt_cols = [row[1] for row in conn.execute("PRAGMA table_info(backtest_runs)").fetchall()]
+    if "fold_parent_id" not in bt_cols:
+        conn.execute("ALTER TABLE backtest_runs ADD COLUMN fold_parent_id INTEGER")
     conn.commit()
     conn.close()
 

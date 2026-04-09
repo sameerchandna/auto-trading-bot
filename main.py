@@ -323,6 +323,122 @@ def _save_backtest(engine, metrics: dict, start_date, end_date, cfg, cfg_label: 
         session.close()
 
 
+@app.command("backtest-folds")
+def backtest_folds(
+    pair: str = typer.Option(DEFAULT_ASSET, "--pair", help="Asset to backtest"),
+    scheme: str = typer.Option("walkforward", "--scheme", help="walkforward | kfold_shuffled"),
+    start: str = typer.Option("2023-01-01", "--start", help="Start YYYY-MM-DD"),
+    end: str = typer.Option(None, "--end", help="End YYYY-MM-DD (default: latest candle in DB)"),
+    capital: float = typer.Option(10_000, "--capital"),
+    workers: int = typer.Option(0, "--workers", help="Parallel workers (0 = os.cpu_count()-1)"),
+    label: str = typer.Option("", "--label"),
+    no_overlap: bool = typer.Option(False, "--no-overlap"),
+    min_score: float = typer.Option(0.0, "--min-score"),
+    block_hours: str = typer.Option("", "--block-hours"),
+    block_days: str = typer.Option("", "--block-days"),
+    cooldown: int = typer.Option(0, "--cooldown"),
+    exclude_tf: str = typer.Option("", "--exclude-tf"),
+):
+    """Walk-forward multi-fold backtest: run baseline on every quarter in range in parallel."""
+    setup_logging()
+    from datetime import date as _date
+    import json as _json
+
+    from backtest.config import BacktestConfig
+    from backtest.folds.splits import SCHEMES, latest_candle_date
+    from backtest.folds.runner import run_folds
+    from backtest.folds.aggregator import aggregate
+    from backtest.folds.report import render_report
+    from storage.database import (
+        BacktestFoldsRun, BacktestRecord, PositionRecord, get_session,
+    )
+
+    if scheme not in SCHEMES:
+        console.print(f"[red]Unknown scheme '{scheme}'. Options: {list(SCHEMES)}[/]")
+        raise typer.Exit(1)
+
+    start_d = datetime.strptime(start, "%Y-%m-%d").date()
+    if end:
+        end_d = datetime.strptime(end, "%Y-%m-%d").date()
+    else:
+        end_d = latest_candle_date(pair)
+        console.print(f"[dim]--end not given; using latest candle in DB: {end_d}[/]")
+
+    day_map = {"mon": 0, "tue": 1, "wed": 2, "thu": 3, "fri": 4, "sat": 5, "sun": 6}
+    cfg = BacktestConfig(
+        no_overlap=no_overlap,
+        min_score=min_score,
+        block_hours=[int(h) for h in block_hours.split(",") if h.strip()] if block_hours else [],
+        block_days=[day_map[d.strip().lower()] for d in block_days.split(",") if d.strip()] if block_days else [],
+        cooldown_after_losses=cooldown,
+        exclude_timeframes=[t.strip() for t in exclude_tf.split(",") if t.strip()] if exclude_tf else [],
+    )
+
+    folds = SCHEMES[scheme](start_d, end_d)
+    if not folds:
+        console.print("[red]No folds produced — check --start/--end[/]")
+        raise typer.Exit(1)
+
+    asset = get_asset(pair)
+    console.print(Panel(
+        f"backtest-folds — {asset.name}\n"
+        f"Scheme:  {scheme}\n"
+        f"Range:   {start_d} to {end_d}\n"
+        f"Folds:   {len(folds)} (partial: {sum(1 for f in folds if f.partial)})\n"
+        f"Capital: \u00a3{capital:,}\n"
+        f"Config:  {cfg.label()}\n"
+        f"Workers: {workers or 'auto'}",
+        title="Walk-Forward Folds",
+        style="blue",
+    ))
+
+    results = run_folds(pair, folds, capital, cfg, max_workers=workers or None)
+    agg = aggregate(results, capital)
+
+    # Persist
+    session = get_session()
+    parent_id = None
+    try:
+        parent = BacktestFoldsRun(
+            pair=pair,
+            scheme=scheme,
+            num_folds=len(folds),
+            start_date=str(start_d),
+            end_date=str(end_d),
+            params_json=_json.dumps({"config": cfg.label()}),
+            summary_json=_json.dumps(agg["summary"]),
+            combined_metrics_json=_json.dumps(agg["combined_metrics"]),
+            combined_equity_curve_json=_json.dumps(agg["combined_equity_curve"]),
+            per_fold_json=_json.dumps(agg["per_fold"]),
+            label=label or f"{scheme}-{start_d}-{end_d}",
+        )
+        session.add(parent)
+        session.flush()
+        parent_id = parent.id
+
+        for r in results:
+            m = r.get("metrics") or {}
+            child = BacktestRecord(
+                pair=pair,
+                start_date=datetime.fromisoformat(r["oos_start"]),
+                end_date=datetime.fromisoformat(r["oos_end"]),
+                params_json=_json.dumps({"fold": r["fold_id"], "partial": r.get("partial", False)}),
+                results_json=_json.dumps(m),
+                total_trades=m.get("total_trades", 0),
+                win_rate=m.get("win_rate", 0.0),
+                total_pnl=m.get("total_pnl", 0.0),
+                max_drawdown=m.get("max_drawdown_pct", 0.0),
+                sharpe_ratio=m.get("sharpe_ratio", 0.0),
+                fold_parent_id=parent_id,
+            )
+            session.add(child)
+        session.commit()
+    finally:
+        session.close()
+
+    render_report(agg, parent_id, pair=pair, scheme=scheme, console=console)
+
+
 @app.command()
 def compare(
     start: str = typer.Option("2023-01-01", help="Start date YYYY-MM-DD"),
