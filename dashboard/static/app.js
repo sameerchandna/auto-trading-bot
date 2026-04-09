@@ -69,6 +69,7 @@ function loadTabData(tab) {
         case 'trades': populateTradeFilter().then(loadTrades); break;
         case 'chart': setTimeout(loadChart, 50); break;
         case 'backtest': loadBacktests(); break;
+        case 'folds': loadFoldRuns(); break;
         case 'research': loadResearch(); break;
         case 'compare': loadComparisons(); break;
         case 'learning': loadLearning(); break;
@@ -858,3 +859,126 @@ setInterval(() => {
     const activeTab = document.querySelector('.tab.active')?.dataset.tab;
     if (activeTab) loadTabData(activeTab);
 }, 30000);
+
+
+// ---- Walk-forward fold runs ----
+
+async function loadFoldRuns() {
+    try {
+        const res = await fetch(`${API}/api/folds`);
+        const runs = await res.json();
+        let html = '';
+        for (const r of runs) {
+            const pnlClass = r.combined_pnl >= 0 ? 'positive' : 'negative';
+            const when = r.created_at ? new Date(r.created_at).toLocaleString() : '-';
+            html += `<tr style="cursor:pointer" onclick="showFoldDetail(${r.id})">
+                <td>${r.id}</td>
+                <td>${r.pair}</td>
+                <td>${r.scheme}</td>
+                <td>${r.label || ''}</td>
+                <td>${r.start_date} → ${r.end_date}</td>
+                <td>${r.num_counted}/${r.num_folds}</td>
+                <td>${r.optimized ? '<span class="badge">optimized</span>' : 'baseline'}</td>
+                <td>${(r.pct_profitable * 100).toFixed(0)}%</td>
+                <td>${(r.combined_pf || 0).toFixed(2)}</td>
+                <td class="${pnlClass}">${fmtPnl(r.combined_pnl)}</td>
+                <td>${(r.combined_dd * 100).toFixed(1)}%</td>
+                <td>${(r.sharpe_mean || 0).toFixed(2)}</td>
+                <td style="font-size:11px;color:#94a3b8">${when}</td>
+            </tr>`;
+        }
+        document.getElementById('folds-body').innerHTML = html ||
+            '<tr><td colspan="13" class="neutral">No fold runs yet. Run: python main.py backtest-folds</td></tr>';
+    } catch(e) {
+        console.error('Folds load failed:', e);
+    }
+}
+
+async function showFoldDetail(id) {
+    try {
+        const res = await fetch(`${API}/api/folds/${id}`);
+        const d = await res.json();
+        if (d.error) return;
+
+        document.getElementById('fold-detail').style.display = 'block';
+        document.getElementById('fold-detail-title').textContent =
+            `#${d.id} — ${d.pair} — ${d.scheme} — ${d.label || ''}`;
+
+        const cm = d.combined_metrics || {};
+        const s = d.summary || {};
+        document.getElementById('fold-detail-summary').innerHTML = `
+            Period: ${d.start_date} → ${d.end_date} |
+            Folds: ${d.num_folds} |
+            Combined: ${cm.total_trades || 0} trades,
+            PF ${(cm.profit_factor || 0).toFixed(2)},
+            P&L ${fmtPnl(cm.total_pnl || 0)},
+            DD ${((cm.max_drawdown_pct || 0) * 100).toFixed(1)}% |
+            Sharpe mean ${((s.sharpe_ratio || {}).mean || 0).toFixed(2)}
+        `;
+
+        // Per-fold table
+        let rows = '';
+        for (const f of (d.per_fold || [])) {
+            const pnlClass = f.total_pnl >= 0 ? 'positive' : 'negative';
+            const isPf = f.is_profit_factor || 0;
+            const delta = f.profit_factor - isPf;
+            const dCls = delta >= 0 ? 'positive' : 'negative';
+            rows += `<tr>
+                <td>${f.fold_id}</td>
+                <td>${f.mode || 'baseline'}</td>
+                <td>${f.status}</td>
+                <td>${f.total_trades}</td>
+                <td>${(f.win_rate * 100).toFixed(1)}%</td>
+                <td>${isPf ? isPf.toFixed(2) : '-'}</td>
+                <td>${(f.profit_factor || 0).toFixed(2)}</td>
+                <td class="${dCls}">${isPf ? (delta >= 0 ? '+' : '') + delta.toFixed(2) : '-'}</td>
+                <td>${(f.sharpe_ratio || 0).toFixed(2)}</td>
+                <td>${((f.max_drawdown_pct || 0) * 100).toFixed(1)}%</td>
+                <td class="${pnlClass}">${fmtPnl(f.total_pnl)}</td>
+            </tr>`;
+        }
+        document.getElementById('fold-detail-body').innerHTML = rows;
+
+        // Combined equity chart
+        const curve = d.combined_equity_curve || [];
+        if (curve.length) {
+            const xs = curve.map(p => p[0]);
+            const ys = curve.map(p => p[1]);
+            Plotly.newPlot('fold-equity-chart', [{
+                x: xs, y: ys, type: 'scatter', mode: 'lines',
+                line: {color: '#22c55e', width: 2},
+                name: 'Combined OOS equity',
+            }], {
+                margin: {l: 50, r: 20, t: 20, b: 40},
+                paper_bgcolor: 'transparent',
+                plot_bgcolor: 'transparent',
+                font: {color: '#cbd5e1'},
+                xaxis: {gridcolor: '#334155'},
+                yaxis: {gridcolor: '#334155', title: 'Equity (£)'},
+            }, {displayModeBar: false, responsive: true});
+        } else {
+            document.getElementById('fold-equity-chart').innerHTML = '<p class="neutral">No equity curve</p>';
+        }
+
+        // Param drift block
+        const drift = d.param_drift || {};
+        const keys = Object.keys(drift);
+        if (keys.length) {
+            let dh = '<h4 style="margin:12px 0 6px">Param Drift (optimized folds)</h4>';
+            dh += '<table><thead><tr><th>Param</th><th>Mean</th><th>Min</th><th>Max</th><th>Per-fold values</th></tr></thead><tbody>';
+            for (const k of keys) {
+                const v = drift[k];
+                const vals = v.values.map(x => Number(x).toFixed(3)).join(', ');
+                dh += `<tr><td>${k}</td><td>${v.mean.toFixed(3)}</td><td>${v.min.toFixed(3)}</td><td>${v.max.toFixed(3)}</td><td style="font-size:11px">${vals}</td></tr>`;
+            }
+            dh += '</tbody></table>';
+            document.getElementById('fold-drift').innerHTML = dh;
+        } else {
+            document.getElementById('fold-drift').innerHTML = '';
+        }
+
+        document.getElementById('fold-detail').scrollIntoView({behavior: 'smooth'});
+    } catch(e) {
+        console.error('Fold detail failed:', e);
+    }
+}

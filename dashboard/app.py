@@ -12,7 +12,7 @@ from config.assets import ASSETS, ACTIVE_ASSETS, DEFAULT_ASSET, get_asset
 from config.settings import PAIR, PAIR_NAME, STARTING_CAPITAL, TIMEFRAMES
 from storage.database import (
     CandleRecord, PositionRecord, SignalRecord,
-    BacktestRecord, ParameterRecord, get_session,
+    BacktestRecord, BacktestFoldsRun, ParameterRecord, get_session,
 )
 
 logger = logging.getLogger(__name__)
@@ -370,6 +370,95 @@ async def get_backtests(pair: str = ""):
                 "short_pnl": metrics.get("short_pnl", 0),
             })
         return result
+    finally:
+        session.close()
+
+
+@app.get("/api/folds")
+async def list_fold_runs(pair: str = ""):
+    """List walk-forward fold runs (parent rows only)."""
+    session = get_session()
+    try:
+        q = session.query(BacktestFoldsRun)
+        if pair:
+            q = q.filter_by(pair=pair)
+        runs = q.order_by(BacktestFoldsRun.created_at.desc()).limit(50).all()
+
+        out = []
+        for r in runs:
+            summary = json.loads(r.summary_json) if r.summary_json else {}
+            combined = json.loads(r.combined_metrics_json) if r.combined_metrics_json else {}
+            per_fold = json.loads(r.per_fold_json) if r.per_fold_json else []
+            counted = [f for f in per_fold if f.get("status") == "ok"]
+            pct_prof = (
+                sum(1 for f in counted if f.get("total_pnl", 0) > 0) / len(counted)
+                if counted else 0.0
+            )
+            any_optimized = any(f.get("mode") == "optimized" for f in per_fold)
+            out.append({
+                "id": r.id,
+                "pair": r.pair,
+                "scheme": r.scheme,
+                "label": r.label,
+                "num_folds": r.num_folds,
+                "num_counted": len(counted),
+                "start_date": r.start_date,
+                "end_date": r.end_date,
+                "created_at": r.created_at.isoformat() if r.created_at else None,
+                "pct_profitable": pct_prof,
+                "optimized": any_optimized,
+                "combined_pnl": combined.get("total_pnl", 0.0),
+                "combined_pf": combined.get("profit_factor", 0.0),
+                "combined_dd": combined.get("max_drawdown_pct", 0.0),
+                "sharpe_mean": (summary.get("sharpe_ratio") or {}).get("mean", 0.0),
+            })
+        return out
+    finally:
+        session.close()
+
+
+@app.get("/api/folds/{run_id}")
+async def get_fold_run(run_id: int):
+    """Full detail for a single fold run."""
+    session = get_session()
+    try:
+        r = session.query(BacktestFoldsRun).filter_by(id=run_id).first()
+        if not r:
+            return {"error": "not found"}
+        per_fold = json.loads(r.per_fold_json) if r.per_fold_json else []
+        summary = json.loads(r.summary_json) if r.summary_json else {}
+        combined_metrics = json.loads(r.combined_metrics_json) if r.combined_metrics_json else {}
+        combined_curve = json.loads(r.combined_equity_curve_json) if r.combined_equity_curve_json else []
+
+        # Derive drift + degradation client-side from per_fold
+        opt = [f for f in per_fold if f.get("mode") == "optimized" and f.get("best_params")]
+        drift = {}
+        for key in ("threshold", "sl_multiplier", "tp_risk_reward", "swing_lookback"):
+            vals = [float(f["best_params"].get(key, 0)) for f in opt]
+            if vals:
+                drift[key] = {
+                    "fold_ids": [f["fold_id"] for f in opt],
+                    "values": vals,
+                    "mean": sum(vals) / len(vals),
+                    "min": min(vals),
+                    "max": max(vals),
+                }
+
+        return {
+            "id": r.id,
+            "pair": r.pair,
+            "scheme": r.scheme,
+            "label": r.label,
+            "num_folds": r.num_folds,
+            "start_date": r.start_date,
+            "end_date": r.end_date,
+            "created_at": r.created_at.isoformat() if r.created_at else None,
+            "per_fold": per_fold,
+            "summary": summary,
+            "combined_metrics": combined_metrics,
+            "combined_equity_curve": combined_curve,
+            "param_drift": drift,
+        }
     finally:
         session.close()
 

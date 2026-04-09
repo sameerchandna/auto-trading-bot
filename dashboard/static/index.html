@@ -26,6 +26,7 @@
         <button class="tab" data-tab="trades">Trades</button>
         <button class="tab" data-tab="chart">Chart</button>
         <button class="tab" data-tab="backtest">Backtests</button>
+        <button class="tab" data-tab="folds">Folds</button>
         <button class="tab" data-tab="research">Research</button>
         <button class="tab" data-tab="compare">Comparisons</button>
         <button class="tab" data-tab="learning">Learning</button>
@@ -142,6 +143,61 @@
                     </thead>
                     <tbody id="backtest-body"></tbody>
                 </table>
+            </div>
+        </section>
+
+        <!-- Folds (walk-forward fold runs) -->
+        <section id="folds" class="tab-content">
+            <div class="card full-width">
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+                    <h3 style="margin:0">Walk-Forward Fold Runs</h3>
+                    <span style="font-size:12px;color:#64748b">Click a row for fold-level detail</span>
+                </div>
+                <table id="folds-table">
+                    <thead>
+                        <tr>
+                            <th>#</th>
+                            <th>Pair</th>
+                            <th>Scheme</th>
+                            <th>Label</th>
+                            <th>Period</th>
+                            <th>Folds</th>
+                            <th>Mode</th>
+                            <th>% Profitable</th>
+                            <th>Combined PF</th>
+                            <th>Combined P&L</th>
+                            <th>Combined DD</th>
+                            <th>Sharpe (mean)</th>
+                            <th>When</th>
+                        </tr>
+                    </thead>
+                    <tbody id="folds-body"></tbody>
+                </table>
+            </div>
+            <div id="fold-detail" class="card full-width" style="margin-top:16px;display:none">
+                <h3 id="fold-detail-title" style="margin-top:0"></h3>
+                <div id="fold-detail-summary" style="font-size:13px;color:#94a3b8;margin-bottom:12px"></div>
+                <div id="fold-equity-chart" style="height:280px;margin-bottom:16px"></div>
+                <h4 style="margin:12px 0 6px">Per-Fold</h4>
+                <table id="fold-detail-table">
+                    <thead>
+                        <tr>
+                            <th>Fold</th>
+                            <th>Mode</th>
+                            <th>Status</th>
+                            <th>Trades</th>
+                            <th>Win%</th>
+                            <th>IS PF</th>
+                            <th>OOS PF</th>
+                            <th>ΔPF</th>
+                            <th>Sharpe</th>
+                            <th>MaxDD%</th>
+                            <th>P&L</th>
+                        </tr>
+                    </thead>
+                    <tbody id="fold-detail-body"></tbody>
+                </table>
+                <div id="fold-drift" style="margin-top:16px"></div>
             </div>
         </section>
 
