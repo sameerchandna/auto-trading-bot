@@ -229,10 +229,22 @@ async def get_trades(limit: int = 2000, offset: int = 0, source: str = "live", b
 
 
 @app.get("/api/equity")
-async def get_equity(pair: str = ""):
+async def get_equity(pair: str = "", source: str = "live"):
+    """Equity curve for the dashboard.
+
+    Defaults to `source=live` — excludes anything tagged `"backtest"` so
+    the curve reflects real paper-trading P&L, not the backtest history
+    stored in the same table. Pass `source=backtest` or `source=all` to
+    override.
+    """
     session = get_session()
     try:
         query = session.query(PositionRecord).filter_by(status="closed")
+        if source == "live":
+            query = query.filter(~PositionRecord.tags.contains('"backtest"'))
+        elif source == "backtest":
+            query = query.filter(PositionRecord.tags.contains('"backtest"'))
+        # source == "all" → no tag filter
         if pair:
             query = query.filter_by(pair=pair)
         trades = query.order_by(PositionRecord.closed_at.asc()).all()

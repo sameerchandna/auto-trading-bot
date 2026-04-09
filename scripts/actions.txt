@@ -1,1 +1,9 @@
 [init] actions log created 2026-04-09 — start_bot/stop_bot append here
+[09/04/2026 10:18:39.24] start_bot: launching python main.py run (cwd=C:\Users\Sameer\Coding Projects\auto-trading-bot\scripts\..) 
+[09/04/2026 10:18:39.27] start_bot: launched window "AutoTradingBot" 
+[09/04/2026 21:43:51.42] start_dashboard: launching python main.py dashboard 
+[09/04/2026 21:43:51.46] start_dashboard: launched 
+[09/04/2026 21:46:19.57] start_dashboard: launching python main.py dashboard 
+[09/04/2026 21:46:19.58] start_dashboard: launched 
+[09/04/2026 21:50:27.94] start_dashboard: launching python main.py dashboard 
+[09/04/2026 21:50:27.95] start_dashboard: launched 
