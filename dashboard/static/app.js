@@ -65,6 +65,7 @@ document.querySelectorAll('.tab').forEach(tab => {
 // Load data based on active tab
 function loadTabData(tab) {
     switch(tab) {
+        case 'manual': break;  // static content, no fetch
         case 'overview': loadOverview(); break;
         case 'trades': populateTradeFilter().then(loadTrades); break;
         case 'chart': setTimeout(loadChart, 50); break;

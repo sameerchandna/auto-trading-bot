@@ -22,6 +22,7 @@
     </header>
 
     <nav>
+        <button class="tab" data-tab="manual">Manual</button>
         <button class="tab active" data-tab="overview">Market Overview</button>
         <button class="tab" data-tab="trades">Trades</button>
         <button class="tab" data-tab="chart">Chart</button>
@@ -35,6 +36,108 @@
 
     <main>
         <!-- Market Overview -->
+        <!-- Manual / user guide -->
+        <section id="manual" class="tab-content">
+            <div class="card full-width" style="max-width:1000px">
+                <h2 style="margin-top:0">Auto Trading Bot — User Manual</h2>
+                <p style="color:#94a3b8">EURUSD-first multi-asset bot with multi-timeframe confluence analysis, walk-forward validation, and self-learning parameter research. Paper trading on an OANDA practice account; ~£10k starting capital.</p>
+
+                <h3>The pipeline in one breath</h3>
+                <p>Data ingestion → multi-TF analysis (15m/1h/4h/1d/1w) → confluence scoring → signal generation → risk management → execution → learning. Everything's driven by <code>config/optimized_params.json</code> (single source of truth, synced to PineScript via <code>/update-strategy</code>).</p>
+
+                <h3>CLI commands</h3>
+                <table>
+                    <thead><tr><th>Command</th><th>What it does</th></tr></thead>
+                    <tbody>
+                        <tr><td><code>python main.py run</code></td><td>Start the live loop on OANDA practice (5-min interval). Fetches data, runs analysis, emits signals, manages positions, logs journal entries.</td></tr>
+                        <tr><td><code>python main.py analyze</code></td><td>One-shot current-state analysis — bias per TF, wave phase, any live signals. Read-only.</td></tr>
+                        <tr><td><code>python main.py fetch</code></td><td>Pull latest candles from Yahoo for all active assets and cache in SQLite.</td></tr>
+                        <tr><td><code>python main.py backtest</code></td><td>Single contiguous backtest over a date range. Saves a row in <code>backtest_runs</code>, visible in the <b>Backtests</b> tab.</td></tr>
+                        <tr><td><code>python main.py backtest-folds</code></td><td>Walk-forward multi-fold backtest (see "Fold runs" below). Saves to <code>backtest_folds_runs</code>, visible in the <b>Folds</b> tab.</td></tr>
+                        <tr><td><code>python main.py compare</code></td><td>Baseline vs. modified config side-by-side — used for A/B testing one rule change at a time.</td></tr>
+                        <tr><td><code>python main.py dashboard</code></td><td>Launches this web UI.</td></tr>
+                    </tbody>
+                </table>
+
+                <h3>What the tabs mean</h3>
+                <dl style="line-height:1.7">
+                    <dt><b>Market Overview</b></dt>
+                    <dd>Live OANDA price, account balance (broker vs. internal ledger split), open positions, equity curve, recent signals, data freshness.</dd>
+
+                    <dt><b>Trades</b></dt>
+                    <dd>Every position (open + closed), filterable by pair. Includes backtest trades (tagged <code>bt_&lt;id&gt;</code>) and live trades.</dd>
+
+                    <dt><b>Chart</b></dt>
+                    <dd>Interactive price chart with candles and overlays.</dd>
+
+                    <dt><b>Backtests</b></dt>
+                    <dd>Results of <code>python main.py backtest</code> runs — one row per run, with win rate, P&L, Sharpe, drawdown, and long/short breakdown. Fold-run children are filtered out so this view stays clean.</dd>
+
+                    <dt><b>Folds</b></dt>
+                    <dd>Walk-forward fold runs (<code>backtest-folds</code>). List view shows % profitable folds, combined OOS P&L, combined profit factor, combined DD, mean Sharpe. Click a row for per-fold detail, a combined OOS equity curve, and (for optimized runs) a param-drift table.</dd>
+
+                    <dt><b>Research</b></dt>
+                    <dd>Automated parameter sweeps run by the research agent. Each row is a mutation tested across scenarios with median PF/WR/DD, OOS check, and a verdict. Budget/baseline state at the top.</dd>
+
+                    <dt><b>Comparisons</b></dt>
+                    <dd>A/B comparison groups — baseline runs paired with variants to visualize rule impact.</dd>
+
+                    <dt><b>Learning</b></dt>
+                    <dd>Parameter history + current production values. Surfaces how params have drifted over time as the learner promotes improvements.</dd>
+
+                    <dt><b>Data</b></dt>
+                    <dd>Data-health view: candle coverage per pair/timeframe, last-updated timestamps, gaps.</dd>
+                </dl>
+
+                <h3>What happens when a backtest runs</h3>
+                <ol>
+                    <li>Load candles from SQLite cache for the requested date range. If missing, fetch from Yahoo and cache.</li>
+                    <li>Iterate 1H candles (starting after a 50-candle warmup). At each bar, build a multi-TF context by binary-searching a 200-candle window ending strictly <i>before</i> the current bar (no lookahead).</li>
+                    <li>Score confluence (HTF bias, BOS, wave, liquidity sweep, S/R, wave ending) using the production params.</li>
+                    <li>Risk-manage signals that clear the threshold: size at 2% risk, enforce max 3 concurrent positions, daily/weekly loss caps.</li>
+                    <li>Open/close positions on SL/TP hits. Record every trade to <code>positions</code> (tagged with a <code>bt_&lt;id&gt;</code>) and journal entries.</li>
+                    <li>Compute 19 metrics (Sharpe/Sortino on daily-resampled returns, PF, expectancy, DD, etc.) and persist to <code>backtest_runs</code>.</li>
+                    <li>Render results in the Backtests tab.</li>
+                </ol>
+
+                <h3>What happens when a fold run runs</h3>
+                <p><b>Phase 1 (validation-only, no <code>--optimize</code>):</b></p>
+                <ol>
+                    <li>Slice the date range into rolling quarterly folds (14 for 2023-01-01 → today). Final in-progress quarter is marked <code>partial</code> and excluded from summary stats.</li>
+                    <li>Fan out folds across <code>ProcessPoolExecutor</code> workers — each worker constructs its own <code>BacktestEngine</code> for its fold's OOS window with baseline params.</li>
+                    <li>Per-fold metrics + equity curves come back; aggregator concatenates segments into a combined OOS curve (each fold rebased to the prior fold's ending equity).</li>
+                    <li>Summary: mean/median/std/min/max across folds for Sharpe, PF, WR, DD, P&L; % profitable folds; combined metrics over the concatenated curve.</li>
+                    <li>Persist to <code>backtest_folds_runs</code> (parent) + tagged child rows in <code>backtest_runs</code> with <code>fold_parent_id</code> set.</li>
+                </ol>
+                <p><b>Phase 2 (with <code>--optimize --trials N</code>):</b></p>
+                <ol>
+                    <li>For each fold, the worker first runs Optuna on the fold's IS window (all prior data within range), fitting weights, threshold, SL multiplier, TP R:R, swing lookback. Folds with IS &lt; 180 days fall back to baseline params.</li>
+                    <li>The best params are then frozen and evaluated on that fold's OOS — a genuine out-of-sample test of the <i>optimization process</i>, not of any single param set.</li>
+                    <li>Report adds IS PF / OOS PF / ΔPF columns, an IS→OOS degradation panel (mean Sharpe/PF/WR drop), and a param-drift block showing how the optimizer's choices move across folds.</li>
+                </ol>
+                <p>Why this matters: optimizing once on all data tells you "these params look good on data they were fit to" — every fold is in-sample and OOS numbers are fiction. Per-fold walk-forward is the honest version and also mirrors how deployment actually works (refit as new data arrives).</p>
+
+                <h3>Key guardrails</h3>
+                <ul>
+                    <li>Max 2% risk per trade, max 3 concurrent positions.</li>
+                    <li>Daily loss limit 4%, weekly 8%.</li>
+                    <li>Paper trading only until backtests prove positive expectancy over 200+ trades.</li>
+                    <li>BT ↔ PineScript params must stay in sync — enforce with <code>python -m tradingview.generate_pine --check</code>.</li>
+                </ul>
+
+                <h3>Where things live in the DB</h3>
+                <ul>
+                    <li><code>candles</code> — raw OHLCV cache</li>
+                    <li><code>positions</code> — every open/closed trade (live + backtest, distinguished by tags)</li>
+                    <li><code>signals</code> — emitted signals (not all become positions)</li>
+                    <li><code>backtest_runs</code> — single-range backtest results (with <code>fold_parent_id</code> linking fold children)</li>
+                    <li><code>backtest_folds_runs</code> — parent row per fold run with summary/per-fold/drift/combined curve JSON</li>
+                    <li><code>trade_journal</code> — post-trade analysis snapshots</li>
+                    <li><code>parameters</code> — historical param promotions by the learner</li>
+                </ul>
+            </div>
+        </section>
+
         <section id="overview" class="tab-content active">
             <div class="grid">
                 <div class="card">
