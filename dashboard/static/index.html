@@ -138,6 +138,24 @@
                     </table>
                 </div>
 
+                <div class="card">
+                    <h3 style="margin-top:0">Scheduled tasks</h3>
+                    <p style="margin:0 0 8px;font-size:13px;color:#64748b">Windows Task Scheduler jobs (BST / UTC+1). Missed runs fire on wake (<code>StartWhenAvailable</code>).</p>
+                    <table>
+                        <thead><tr><th>Task</th><th>Schedule</th><th>What it does</th></tr></thead>
+                        <tbody>
+                            <tr><td><code>ATB_DataFetch</code></td><td>Daily 07:00</td><td>Fetch latest OHLCV candles from Yahoo</td></tr>
+                            <tr><td><code>ATB_CodeReview</code></td><td>Daily 08:00</td><td>Run code review agent, push findings to approvals</td></tr>
+                            <tr><td><code>ATB_Research</code></td><td>Daily 09:00</td><td>Research pipeline + email report (~09:15)</td></tr>
+                            <tr><td><code>ATB_DeepFetch</code></td><td>Sunday 06:00</td><td>Deep historical fetch (all timeframes)</td></tr>
+                        </tbody>
+                    </table>
+                    <p style="margin:8px 0 0;font-size:12px;color:#64748b">
+                        Register: <code>scripts\register_scheduled_jobs.bat</code> (admin) &nbsp;|&nbsp;
+                        Remove: <code>scripts\unregister_scheduled_jobs.bat</code> (admin)
+                    </p>
+                </div>
+
             </div>
         </section>
 
