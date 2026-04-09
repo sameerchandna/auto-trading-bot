@@ -262,13 +262,23 @@ def _save_backtest(engine, metrics: dict, start_date, end_date, cfg, cfg_label: 
     from storage.database import BacktestRecord, PositionRecord, TradeJournalRecord, get_session
     import json
 
+    # Snapshot the strategy params that were actually live for this run so
+    # two "baseline" runs on different param versions are distinguishable.
+    strat = getattr(engine, "params", None) or {}
     session = get_session()
     try:
         rec = BacktestRecord(
             pair=pair,
             start_date=start_date,
             end_date=end_date,
-            params_json=json.dumps({"config": cfg_label}),
+            params_json=json.dumps({
+                "config": cfg_label,
+                "threshold": strat.get("threshold"),
+                "sl_multiplier": strat.get("sl_multiplier"),
+                "tp_risk_reward": strat.get("tp_risk_reward"),
+                "swing_lookback": strat.get("swing_lookback"),
+                "weights": strat.get("weights"),
+            }),
             results_json=json.dumps(metrics),
             total_trades=metrics["total_trades"],
             win_rate=metrics["win_rate"],

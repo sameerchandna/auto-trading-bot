@@ -342,13 +342,33 @@ async def get_backtests(pair: str = ""):
         for r in runs:
             params = json.loads(r.params_json) if r.params_json else {}
             metrics = json.loads(r.results_json) if r.results_json else {}
+
+            # Build a compact config label: flag-label (if any) + params fingerprint
+            cfg_label = params.get("config", "baseline")
+            thr = params.get("threshold")
+            slm = params.get("sl_multiplier")
+            tpr = params.get("tp_risk_reward")
+            parts = []
+            if thr is not None:
+                parts.append(f"thr{thr:.2f}")
+            if slm is not None:
+                parts.append(f"SL{slm:.1f}")
+            if tpr is not None:
+                parts.append(f"TP{tpr:.1f}")
+            fingerprint = " ".join(parts)
+            if cfg_label and cfg_label != "baseline":
+                config_display = f"{fingerprint} +{cfg_label}" if fingerprint else cfg_label
+            else:
+                config_display = fingerprint or "baseline"
+
             result.append({
                 "id": r.id,
                 "pair": r.pair or DEFAULT_ASSET,
                 "timestamp": r.timestamp.isoformat(),
                 "start_date": r.start_date.isoformat(),
                 "end_date": r.end_date.isoformat(),
-                "config": params.get("config", "baseline"),
+                "config": config_display,
+                "config_full": params,
                 "total_trades": r.total_trades,
                 "win_rate": r.win_rate,
                 "total_pnl": r.total_pnl,
