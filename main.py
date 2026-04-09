@@ -332,6 +332,8 @@ def backtest_folds(
     capital: float = typer.Option(10_000, "--capital"),
     workers: int = typer.Option(0, "--workers", help="Parallel workers (0 = os.cpu_count()-1)"),
     label: str = typer.Option("", "--label"),
+    optimize: bool = typer.Option(False, "--optimize", help="Per-fold Optuna fit on IS, eval on OOS"),
+    trials: int = typer.Option(30, "--trials", help="Optuna trials per fold when --optimize"),
     no_overlap: bool = typer.Option(False, "--no-overlap"),
     min_score: float = typer.Option(0.0, "--min-score"),
     block_hours: str = typer.Option("", "--block-hours"),
@@ -392,7 +394,12 @@ def backtest_folds(
         style="blue",
     ))
 
-    results = run_folds(pair, folds, capital, cfg, max_workers=workers or None)
+    results = run_folds(
+        pair, folds, capital, cfg,
+        max_workers=workers or None,
+        optimize=optimize,
+        n_trials=trials,
+    )
     agg = aggregate(results, capital)
 
     # Persist
@@ -422,7 +429,13 @@ def backtest_folds(
                 pair=pair,
                 start_date=datetime.fromisoformat(r["oos_start"]),
                 end_date=datetime.fromisoformat(r["oos_end"]),
-                params_json=_json.dumps({"fold": r["fold_id"], "partial": r.get("partial", False)}),
+                params_json=_json.dumps({
+                    "fold": r["fold_id"],
+                    "partial": r.get("partial", False),
+                    "mode": r.get("mode", "baseline"),
+                    "best_params": r.get("best_params"),
+                    "is_metrics": r.get("is_metrics"),
+                }),
                 results_json=_json.dumps(m),
                 total_trades=m.get("total_trades", 0),
                 win_rate=m.get("win_rate", 0.0),

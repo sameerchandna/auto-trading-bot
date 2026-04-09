@@ -33,17 +33,24 @@ def aggregate(fold_results: list[dict], initial_capital: float) -> dict:
     for f in fold_results:
         status = _status(f)
         m = f.get("metrics") or {}
+        is_m = f.get("is_metrics") or {}
         per_fold.append({
             "fold_id": f["fold_id"],
             "label": f["label"],
             "partial": f.get("partial", False),
             "status": status,
+            "mode": f.get("mode", "baseline"),
             "total_trades": m.get("total_trades", 0),
             "win_rate": m.get("win_rate", 0.0),
             "profit_factor": m.get("profit_factor", 0.0),
             "sharpe_ratio": m.get("sharpe_ratio", 0.0),
             "max_drawdown_pct": m.get("max_drawdown_pct", 0.0),
             "total_pnl": m.get("total_pnl", 0.0),
+            "is_profit_factor": is_m.get("profit_factor", 0.0),
+            "is_sharpe_ratio": is_m.get("sharpe_ratio", 0.0),
+            "is_win_rate": is_m.get("win_rate", 0.0),
+            "is_total_trades": is_m.get("total_trades", 0),
+            "best_params": f.get("best_params"),
         })
         if status == "ok":
             countable.append(f)
@@ -72,6 +79,9 @@ def aggregate(fold_results: list[dict], initial_capital: float) -> dict:
     combined_curve, combined_trades = _build_combined(fold_results, initial_capital)
     combined_metrics = _combined_metrics(combined_trades, initial_capital, combined_curve)
 
+    drift = _param_drift(fold_results)
+    degradation = _is_oos_degradation(countable)
+
     return {
         "per_fold": per_fold,
         "summary": summary,
@@ -80,6 +90,52 @@ def aggregate(fold_results: list[dict], initial_capital: float) -> dict:
         "num_counted": len(countable),
         "combined_equity_curve": combined_curve,
         "combined_metrics": combined_metrics,
+        "param_drift": drift,
+        "degradation": degradation,
+    }
+
+
+def _param_drift(fold_results: list[dict]) -> dict:
+    """Track how optimizer-chosen scalar params move across folds."""
+    keys = ["threshold", "sl_multiplier", "tp_risk_reward", "swing_lookback"]
+    series = {k: [] for k in keys}
+    fold_ids = []
+    for f in fold_results:
+        bp = f.get("best_params")
+        if not bp or f.get("mode") != "optimized":
+            continue
+        fold_ids.append(f["fold_id"])
+        for k in keys:
+            series[k].append(float(bp.get(k, 0.0)))
+
+    out = {"fold_ids": fold_ids, "series": series, "stats": {}}
+    for k, vals in series.items():
+        if vals:
+            out["stats"][k] = {
+                "mean": mean(vals),
+                "std": pstdev(vals) if len(vals) > 1 else 0.0,
+                "min": min(vals),
+                "max": max(vals),
+            }
+    return out
+
+
+def _is_oos_degradation(countable: list[dict]) -> dict:
+    """Mean IS→OOS drop for folds that were actually optimized."""
+    opt = [f for f in countable if f.get("mode") == "optimized" and f.get("is_metrics")]
+    if not opt:
+        return {}
+    deltas_pf, deltas_sharpe, deltas_wr = [], [], []
+    for f in opt:
+        m = f["metrics"]; im = f["is_metrics"]
+        deltas_pf.append(m.get("profit_factor", 0.0) - im.get("profit_factor", 0.0))
+        deltas_sharpe.append(m.get("sharpe_ratio", 0.0) - im.get("sharpe_ratio", 0.0))
+        deltas_wr.append(m.get("win_rate", 0.0) - im.get("win_rate", 0.0))
+    return {
+        "n_optimized": len(opt),
+        "profit_factor_delta_mean": mean(deltas_pf),
+        "sharpe_delta_mean": mean(deltas_sharpe),
+        "win_rate_delta_mean": mean(deltas_wr),
     }
 
 

@@ -327,7 +327,9 @@ async def get_signals(limit: int = 20, pair: str = ""):
 async def get_backtests(pair: str = ""):
     session = get_session()
     try:
-        query = session.query(BacktestRecord)
+        query = session.query(BacktestRecord).filter(
+            BacktestRecord.fold_parent_id.is_(None)
+        )
         if pair:
             query = query.filter_by(pair=pair)
         runs = (
