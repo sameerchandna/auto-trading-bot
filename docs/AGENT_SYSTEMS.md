@@ -462,10 +462,16 @@ Five scheduled jobs:
 
 ```
 Job 1: Data Fetch       06:00 UTC  (daily)          →  python main.py fetch
-Job 2: Code Review      07:00 UTC  (daily)          →  python scheduler/code_review_job.py
-Job 3: Research         08:00 UTC  (daily)          →  python scheduler/research_job.py
-Job 4: Email Report     19:00 UTC  (daily)          →  python scheduler/email_report_job.py
-Job 5: Deep Fetch       05:00 UTC  (Sunday only)    →  python main.py fetch --deep
+Job 2: Code Review      07:00 UTC  (daily)          →  python -m scheduler.code_review_job
+Job 3: Research+Email   08:00 UTC  (daily)          →  python -m scheduler.research_job
+Job 4: Deep Fetch       05:00 UTC  (Sunday only)    →  python main.py fetch --deep
+
+Note: the daily report email is now **chained off the tail of the research
+job** (2026-04-09 change) — it fires the moment research completes, which
+means the user gets the report ~08:15 UTC instead of waiting until 19:00.
+`python -m scheduler.email_report_job` still exists as a manual "send me
+the current state right now" trigger. Use `--no-email` on research_job to
+skip the chained send during ad-hoc testing.
 ```
 
 Note: Jobs 2 and 3 write their results to the DB/reports directory.

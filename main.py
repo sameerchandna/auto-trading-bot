@@ -137,7 +137,7 @@ def analyze(
 
 @app.command()
 def run(
-    interval: int = typer.Option(60, help="Loop interval in seconds (default 60s)"),
+    interval: int = typer.Option(300, help="Loop interval in seconds (default 300s = 5min)"),
     pairs: str = typer.Option("", "--pairs", help="Comma-separated pairs to trade (default: active assets)"),
 ):
     """Start the trading bot on OANDA practice account."""

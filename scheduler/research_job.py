@@ -89,7 +89,31 @@ def _write_report(path: Path, results: list[dict]) -> None:
     path.write_text("\n".join(lines), encoding="utf-8")
 
 
-def run(budget: int | None = None, dry_run: bool = False, seed: int | None = None) -> dict:
+def _send_chained_email() -> None:
+    """Fire the daily report email after research completes.
+
+    Research is the last scheduled step of the morning pipeline (fetch →
+    code review → research), so hooking the email off its tail means the
+    user receives the report the moment all processing is done, instead
+    of waiting until a fixed 19:00 slot.
+
+    Failures here are logged but do not fail the research job itself —
+    the research results are already on disk and in the approval queue.
+    """
+    try:
+        from dotenv import load_dotenv
+        load_dotenv(Path(__file__).parent.parent / ".env")
+        from notifications.report_builder import build_report
+        from notifications.email_reporter import send_report
+        subject, body_text, body_html = build_report()
+        send_report(subject, body_text, body_html)
+        print(f"Daily report email sent: {subject}")
+    except Exception as exc:
+        print(f"WARNING: chained email failed: {exc}", file=sys.stderr)
+
+
+def run(budget: int | None = None, dry_run: bool = False, seed: int | None = None,
+        send_email: bool = True) -> dict:
     """Main entry point. Returns a summary dict."""
     data = history.load()
     data = history.sync_rolling_baseline(data)
@@ -166,6 +190,11 @@ def run(budget: int | None = None, dry_run: bool = False, seed: int | None = Non
         "report": str(report_path),
     }
     print("\nSummary:", json.dumps(summary, indent=2))
+
+    if send_email and not dry_run:
+        print("\nSending chained daily report email...")
+        _send_chained_email()
+
     return summary
 
 
@@ -174,9 +203,10 @@ def main() -> int:
     parser.add_argument("--budget", type=int, default=None, help="Override max combinations (default: 5)")
     parser.add_argument("--dry-run", action="store_true", help="Don't write history or report")
     parser.add_argument("--seed", type=int, default=None, help="Seed for reproducible candidate selection")
+    parser.add_argument("--no-email", action="store_true", help="Skip the chained daily report email")
     args = parser.parse_args()
     try:
-        run(budget=args.budget, dry_run=args.dry_run, seed=args.seed)
+        run(budget=args.budget, dry_run=args.dry_run, seed=args.seed, send_email=not args.no_email)
         return 0
     except Exception as exc:
         print(f"research_job FAILED: {exc}", file=sys.stderr)
