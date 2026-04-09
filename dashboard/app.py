@@ -29,7 +29,7 @@ register_approval_routes(app)
 
 @app.get("/", response_class=HTMLResponse)
 async def index():
-    return (STATIC_DIR / "index.html").read_text()
+    return (STATIC_DIR / "index.html").read_text(encoding="utf-8")
 
 
 @app.get("/api/assets")
