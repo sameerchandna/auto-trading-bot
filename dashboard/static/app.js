@@ -521,11 +521,13 @@ async function loadBacktests() {
             const shortWr = r.short_trades ? ((r.short_wins / r.short_trades) * 100).toFixed(0) : '-';
             const longPnlClass = r.long_pnl >= 0 ? 'positive' : 'negative';
             const shortPnlClass = r.short_pnl >= 0 ? 'positive' : 'negative';
+            const cfg = r.config || 'baseline';
             html += `<tr>
                 <td>${r.id}</td>
                 <td>${r.pair}</td>
                 <td>${new Date(r.timestamp).toLocaleDateString()}</td>
                 <td>${new Date(r.start_date).toLocaleDateString()} - ${new Date(r.end_date).toLocaleDateString()}</td>
+                <td title="${cfg}" style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;color:#cbd5e1">${cfg}</td>
                 <td>${r.total_trades}</td>
                 <td>${(r.win_rate * 100).toFixed(1)}%</td>
                 <td class="${pnlClass}">${fmtPnl(r.total_pnl)}</td>
@@ -535,7 +537,7 @@ async function loadBacktests() {
                 <td>${r.sharpe_ratio.toFixed(2)}</td>
             </tr>`;
         }
-        document.getElementById('backtest-body').innerHTML = html || '<tr><td colspan="11" class="neutral">No backtests yet. Run: python main.py backtest</td></tr>';
+        document.getElementById('backtest-body').innerHTML = html || '<tr><td colspan="12" class="neutral">No backtests yet. Run: python main.py backtest</td></tr>';
     } catch(e) {
         console.error('Backtests load failed:', e);
     }
