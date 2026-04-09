@@ -144,10 +144,37 @@ async function loadOandaAccount() {
     }
 }
 
+// Internal ledger card (10k paper)
+async function loadInternalLedger() {
+    try {
+        const res = await fetch(`${API}/api/status?pair=${selectedPair}`);
+        const data = await res.json();
+        const pnlClass = data.total_pnl >= 0 ? 'positive' : 'negative';
+        const riskPerTrade = data.starting_capital * 0.02;
+        const stats = [
+            ['Starting Capital', `\u00a3${data.starting_capital.toLocaleString()}`],
+            ['Current Equity', `\u00a3${data.capital.toLocaleString()}`],
+            ['Realized P&L', `\u00a3${data.total_pnl >= 0 ? '+' : ''}${data.total_pnl.toFixed(2)}`],
+            ['Risk / Trade (2%)', `\u00a3${riskPerTrade.toFixed(0)}`],
+            ['Open Positions', data.open_positions],
+            ['Closed Trades', data.closed_positions],
+        ];
+        let html = '';
+        for (const [label, value] of stats) {
+            const cls = label === 'Realized P&L' ? pnlClass : '';
+            html += `<div class="stat-row"><span class="stat-label">${label}</span><span class="stat-value ${cls}">${value}</span></div>`;
+        }
+        document.getElementById('internal-ledger').innerHTML = html;
+    } catch(e) {
+        document.getElementById('internal-ledger').innerHTML = '<p class="neutral">Error loading ledger</p>';
+    }
+}
+
 // Overview tab
 async function loadOverview() {
     loadStatus();
     loadLivePrice();
+    loadInternalLedger();
     loadOandaAccount();
     loadEquityCurve();
     loadRecentSignals();
