@@ -1,0 +1,88 @@
+{
+  "trained_at": "2026-04-10T20:33:58.197689",
+  "samples": 1202,
+  "win_rate": 0.386,
+  "features": [
+    "htf_bias",
+    "bos",
+    "wave_position",
+    "liquidity_sweep",
+    "sr_reaction",
+    "wave_ending",
+    "confluence_score",
+    "bias_strength",
+    "adx",
+    "direction_long",
+    "hour_sin",
+    "hour_cos"
+  ],
+  "feature_importance": {
+    "htf_bias": 0.0041,
+    "bos": 0.2438,
+    "wave_position": 0.0186,
+    "liquidity_sweep": 0.047,
+    "sr_reaction": 0.07,
+    "wave_ending": 0.0046,
+    "confluence_score": 0.2489,
+    "bias_strength": -0.2162,
+    "adx": -0.1707,
+    "direction_long": -0.0108,
+    "hour_sin": 0.0,
+    "hour_cos": 0.0
+  },
+  "cv_results": [
+    {
+      "fold": 1,
+      "train_size": 400,
+      "test_size": 200,
+      "accuracy": 0.49,
+      "auc": 0.452,
+      "brier": 0.2607,
+      "test_wr": 0.46,
+      "pred_wr": 0.26
+    },
+    {
+      "fold": 2,
+      "train_size": 600,
+      "test_size": 200,
+      "accuracy": 0.51,
+      "auc": 0.514,
+      "brier": 0.2688,
+      "test_wr": 0.32,
+      "pred_wr": 0.57
+    },
+    {
+      "fold": 3,
+      "train_size": 800,
+      "test_size": 200,
+      "accuracy": 0.55,
+      "auc": 0.566,
+      "brier": 0.2513,
+      "test_wr": 0.375,
+      "pred_wr": 0.535
+    },
+    {
+      "fold": 4,
+      "train_size": 1000,
+      "test_size": 200,
+      "accuracy": 0.665,
+      "auc": 0.699,
+      "brier": 0.2315,
+      "test_wr": 0.41,
+      "pred_wr": 0.485
+    },
+    {
+      "fold": 5,
+      "train_size": 1200,
+      "test_size": 2,
+      "accuracy": 1.0,
+      "auc": 1.0,
+      "brier": 0.187,
+      "test_wr": 0.5,
+      "pred_wr": 0.5
+    }
+  ],
+  "mean_auc": 0.646,
+  "mean_accuracy": 0.643,
+  "mean_brier": 0.2399
+}

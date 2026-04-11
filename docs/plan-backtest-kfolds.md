@@ -2,8 +2,9 @@
 
 ## Status
 - **Phase 1: SHIPPED** (commit `c7f32fa`, 2026-04-09). Command live, tests green, smoke + parallel + kfold_shuffled runs verified against a single-range BT over the same window. Saved as `backtest_folds_runs` id 1/2/3. Parallel wall time ~36s vs single-range ~111s. Headline on EURUSD baseline post overfitting-fix: 11/13 complete quarters profitable, Sharpe mean 1.87, combined OOS £61.5k on £10k (PF 1.35, DD 13.7%).
-- **Phase 2: TODO** — fit-on-IS / test-on-OOS (Optuna per fold) reusing the same splitter + aggregator.
-- **Dashboard UI for fold runs: TODO** — schema ready, not wired.
+- **Phase 2: SHIPPED** — fit-on-IS / test-on-OOS via `--optimize`/`--trials`. `backtest/folds/optimizer.py` runs Optuna (TPESampler seed=42) per fold with `params_override` (no global mutation); folds with `IS < MIN_IS_DAYS=180` fall back to baseline. Aggregator reports IS→OOS degradation and param drift. Confirmed scale-linear with IS length (180d→376s, 546d→1328s per fold).
+- **Dashboard UI for fold runs: SHIPPED** — Folds tab with list table + click-through detail (combined equity Plotly chart, per-fold table, param drift block). `/api/folds` + `/api/folds/{id}`. `BacktestRecord.fold_parent_id` filter keeps fold children out of the main Backtests tab.
+- **Deferred (not requested):** incremental persistence so interrupted fold runs are salvageable; rolling IS window option to cap per-fold cost instead of expanding IS each quarter.
 
 ## Context
 
@@ -154,8 +155,8 @@ Reuses the exact same flag parsing helpers the existing `backtest` command uses 
 
 ## Out of scope (explicitly deferred)
 
-- Phase 2 fit-on-IS / test-on-OOS (Optuna per fold)
-- Dashboard UI for fold runs (schema is ready, UI comes later)
+- Incremental persistence for fold runs (salvage partial results on interrupt)
+- Rolling IS window option (cap per-fold optimize cost)
 - Live learner re-enable
 
 ## Verification

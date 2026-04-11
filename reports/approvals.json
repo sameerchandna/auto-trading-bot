@@ -44,6 +44,51 @@
       "rule_id": "WR-002",
       "file": "analysis/confluence.py",
       "finding_hash": "785079f5c8a3"
+    },
+    {
+      "id": "C1",
+      "kind": "code",
+      "title": "Fix WR-002 in analysis/confluence.py:70",
+      "details": "  Risk: MEDIUM\n  Issue: Hardcoded timeframe literal \"15m\" \u2014 should come from config.\n  Code: tf_priority = [\"15m\", \"1h\", \"4h\", \"1d\", \"1wk\"]\n  Suggested fix: Move the timeframe literal into `config/settings.py` and import it.\n  Hash: bcf26ce491f4",
+      "rule_id": "WR-002",
+      "file": "analysis/confluence.py",
+      "finding_hash": "bcf26ce491f4"
+    },
+    {
+      "id": "C2",
+      "kind": "code",
+      "title": "Fix WR-002 in analysis/confluence.py:140",
+      "details": "  Risk: MEDIUM\n  Issue: Hardcoded timeframe literal \"4h\" \u2014 should come from config.\n  Code: trigger_tf = \"4h\"  # default\n  Suggested fix: Move the timeframe literal into `config/settings.py` and import it.\n  Hash: 277aaa59b29e",
+      "rule_id": "WR-002",
+      "file": "analysis/confluence.py",
+      "finding_hash": "277aaa59b29e"
+    },
+    {
+      "id": "C3",
+      "kind": "code",
+      "title": "Fix WR-002 in analysis/confluence.py:145",
+      "details": "  Risk: MEDIUM\n  Issue: Hardcoded timeframe literal \"1d\" \u2014 should come from config.\n  Code: daily = context.analyses.get(\"1d\")\n  Suggested fix: Move the timeframe literal into `config/settings.py` and import it.\n  Hash: 37133c83bfaa",
+      "rule_id": "WR-002",
+      "file": "analysis/confluence.py",
+      "finding_hash": "37133c83bfaa"
+    },
+    {
+      "id": "C4",
+      "kind": "code",
+      "title": "Fix WR-002 in analysis/confluence.py:167",
+      "details": "  Risk: MEDIUM\n  Issue: Hardcoded timeframe literal \"4h\" \u2014 should come from config.\n  Code: for tf in [\"4h\", \"1h\"]:\n  Suggested fix: Move the timeframe literal into `config/settings.py` and import it.\n  Hash: c5896983571f",
+      "rule_id": "WR-002",
+      "file": "analysis/confluence.py",
+      "finding_hash": "c5896983571f"
+    },
+    {
+      "id": "C5",
+      "kind": "code",
+      "title": "Fix WR-002 in analysis/confluence.py:184",
+      "details": "  Risk: MEDIUM\n  Issue: Hardcoded timeframe literal \"4h\" \u2014 should come from config.\n  Code: for tf in [\"4h\", \"1h\"]:\n  Suggested fix: Move the timeframe literal into `config/settings.py` and import it.\n  Hash: 9364aeb68ef8",
+      "rule_id": "WR-002",
+      "file": "analysis/confluence.py",
+      "finding_hash": "9364aeb68ef8"
     }
   ],
   "approved": [],

@@ -141,7 +141,13 @@ class BacktestEngine:
 
             # Run analysis
             try:
-                context = build_price_context(candle_windows, pair=self.pair)
+                adx_thresh = self.params.get("regime_adx_threshold", 25.0)
+                atr_vol_thresh = self.params.get("atr_volatility_threshold", 80.0)
+                context = build_price_context(
+                    candle_windows, pair=self.pair,
+                    adx_threshold=adx_thresh,
+                    atr_volatility_threshold=atr_vol_thresh,
+                )
             except Exception as e:
                 logger.debug(f"Analysis error at {current_date}: {e}")
                 continue
@@ -168,6 +174,15 @@ class BacktestEngine:
                 sl_atr_mult=self.params["sl_multiplier"],
                 tp_rr=self.params["tp_risk_reward"],
                 sl_method=self.config.sl_method,
+                regime_filter_enabled=self.params.get("regime_filter_enabled", False),
+                regime_params_enabled=self.params.get("regime_params_enabled", False),
+                regime_params=self.params.get("regime_params"),
+                signal_model_enabled=self.params.get("signal_model_enabled", False),
+                signal_model_min_confidence=self.params.get("signal_model_min_confidence", 0.5),
+                news_filter_enabled=self.params.get("news_filter_enabled", False),
+                news_block_before_mins=self.params.get("news_block_before_mins", 30),
+                news_block_after_mins=self.params.get("news_block_after_mins", 15),
+                current_time=current_date,
             )
 
             # Apply config filters before execution

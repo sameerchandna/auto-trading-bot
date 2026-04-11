@@ -1,8 +1,8 @@
-https://github.com/anthropics/claude-plugins-official.git
 
-----------------------------------------------------------------
+==================================================================
 auto-trading-bot
-----------------------------------------------------------------
+==================================================================
+
 Hi. This is a brand new project
 You have £10000 to trade and invest
 You can only trade on EURUSD chart to start with.
@@ -227,7 +227,8 @@ Thr			Trades	WR		PF		P&L			DD		Sharpe	Expect	Avg W	Avg L
 0.40		1,078	41.0%	1.27	£31,716		39.8%	0.01	2.0p	20.0	10.6
 0.45		833		43.3%	1.38	£28,385		41.8%	-0.01	2.3p	19.2	10.7
 0.50		521		44.0%	1.46	£23,167		34.3%	-0.06	2.7p	20.6	11.3
-0.60		227		42.7%	1.36	£9,187		28.6%	-0.35	2.4p	20.2	10.9
+0.60		227		42.7%	1.36	£9,187
+a3		28.6%	-0.35	2.4p	20.2	10.9
 SL = 1.5x ATR
 Thr			Trades	WR		PF		P&L			DD		Sharpe	Expect	Avg W	Avg L
 0.30		1,067	39.1%	1.26	£40,796		37.4%	0.05	2.7p	30.9	15.4
@@ -274,3 +275,31 @@ NEXT POSSIBLE STEPS
 5. /update-strategy skill — currently only syncs EURUSD params to PineScript. Could be extended to handle per-pair pine indicators.
 
 What would you like to tackle first?
+
+
+-------------------------------------------------
+EMAIL
+-------------------------------------------------
+What was built
+  - notifications/email_reporter.py — thin wrapper over email_utils.send_email, reads GMAIL_USER/GMAIL_APP_PASSWORD/REPORT_TO_EMAIL from env
+  - notifications/report_builder.py — assembles the daily report: real sections for status/today's trading/open positions/weekly summary, stub
+  sections for research/code-review/readiness (Phases 4–6)
+  - notifications/approval_handler.py — FastAPI routes /approve/{kind}/{id}, /reject/{kind}/{id}, /api/approvals; idempotent (double-click safe),
+  persists to reports/approvals.json
+  - dashboard/app.py — mounts the approval routes (verified: all 3 routes registered)
+  - scheduler/email_report_job.py — entry point for 19:00 UTC Task Scheduler job; loads .env, builds report, sends, exits non-zero on failure
+  - reports/approvals.json — initialized with empty buckets                                                                                           - .env.example — placeholders for GMAIL_USER, GMAIL_APP_PASSWORD, REPORT_TO_EMAIL=Sameer.Chandna@gmail.com
+                                                                                                                                                      Verified working
+  - Report builds cleanly against current DB (£10,000.00, 0 trades — as expected)
+  - Approval decide flow: pending → approved, idempotent on double-click
+  - Dashboard app imports with new routes mounted
+  - email_utils imports from the sibling package
+
+  Task 5 — your turn (once you have Gmail App Password)
+  1. Copy .env.example → update your .env with GMAIL_USER, GMAIL_APP_PASSWORD
+  2. python -m scheduler.email_report_job — should send to Sameer.Chandna@gmail.com
+  3. Start dashboard (python main.py dashboard)
+  4. Manually drop a test entry into reports/approvals.json pending list, re-run the job, click the Approve link in the email, confirm it moves to
+  approved
+
+  Want me to also write the Windows Task Scheduler XML / cmd line snippet for the 19:00 UTC job, or leave that for when you're on the PC?

@@ -658,5 +658,166 @@ def status(
         session.close()
 
 
+@app.command("train-model")
+def train_model_cmd(
+    start: str = typer.Option("2023-01-01", help="Training data start date"),
+    end: str = typer.Option(None, help="Training data end date (default: today)"),
+    pair: str = typer.Option(DEFAULT_ASSET, "--pair"),
+    folds: int = typer.Option(5, "--folds", help="Walk-forward CV folds"),
+):
+    """Train the signal quality model on backtest data."""
+    setup_logging()
+    from analysis.signal_model import generate_training_data, train_model, FEATURE_COLS
+
+    start_date = datetime.strptime(start, "%Y-%m-%d")
+    end_date = datetime.strptime(end, "%Y-%m-%d") if end else datetime.utcnow()
+
+    console.print(Panel(
+        f"Training signal model\n"
+        f"Data: {start} to {end_date.strftime('%Y-%m-%d')} ({pair})\n"
+        f"Walk-forward CV folds: {folds}",
+        title="Signal Model",
+        style="blue",
+    ))
+
+    console.print("[dim]Generating training data from backtest...[/]")
+    X, y = generate_training_data(start_date, end_date, pair)
+
+    if len(X) < 100:
+        console.print(f"[red]Only {len(X)} samples — need at least 100 to train[/]")
+        return
+
+    console.print(f"[green]Dataset: {len(X)} trades, {y.mean():.1%} win rate[/]")
+    console.print("[dim]Training model with walk-forward CV...[/]")
+
+    meta = train_model(X, y, n_splits=folds)
+
+    # Show CV results
+    table = Table(title="Walk-Forward Cross-Validation")
+    table.add_column("Fold", style="cyan")
+    table.add_column("Train", style="dim")
+    table.add_column("Test", style="dim")
+    table.add_column("Accuracy", style="bold")
+    table.add_column("AUC", style="bold")
+    table.add_column("Brier", style="dim")
+
+    for r in meta["cv_results"]:
+        table.add_row(
+            str(r["fold"]),
+            str(r["train_size"]),
+            str(r["test_size"]),
+            f"{r['accuracy']:.3f}",
+            f"{r['auc']:.3f}",
+            f"{r['brier']:.4f}",
+        )
+    console.print(table)
+
+    console.print(
+        f"\n[bold]Mean AUC: {meta['mean_auc']:.3f} | "
+        f"Mean Accuracy: {meta['mean_accuracy']:.3f}[/]"
+    )
+
+    # Feature importance
+    table2 = Table(title="Feature Importance (Logistic Regression Coefficients)")
+    table2.add_column("Feature", style="cyan")
+    table2.add_column("Coefficient", style="bold")
+    sorted_feats = sorted(
+        meta["feature_importance"].items(),
+        key=lambda x: abs(x[1]), reverse=True,
+    )
+    for name, coef in sorted_feats:
+        color = "green" if coef > 0 else "red"
+        table2.add_row(name, f"[{color}]{coef:+.4f}[/{color}]")
+    console.print(table2)
+
+    console.print(f"\n[green]Model saved to models/signal_model.pkl[/]")
+    console.print(
+        "[dim]Enable with: set signal_model_enabled=true in optimized_params.json[/]"
+    )
+
+
+@app.command("feature-importance")
+def feature_importance_cmd(
+    pair: str = typer.Option("", "--pair", help="Specific pair (default: all active)"),
+    days: int = typer.Option(180, "--days", help="Lookback period in days"),
+    save: bool = typer.Option(True, "--save/--no-save", help="Save to strategic memory"),
+):
+    """Compute and display feature importance from closed trades."""
+    setup_logging()
+    from analysis.feature_importance import compute_feature_importance, compute_all_pairs
+
+    console.print(f"[cyan]Computing feature importance ({days}-day lookback)...[/]\n")
+
+    if pair:
+        results = {pair: compute_feature_importance(pair=pair, lookback_days=days)}
+    else:
+        results = compute_all_pairs(lookback_days=days)
+
+    if not results:
+        console.print("[red]No data — need at least 30 closed trades with feature vectors[/]")
+        return
+
+    for pair_key, result in results.items():
+        if result.get("status") != "ok":
+            console.print(
+                f"[dim]{pair_key}: insufficient data "
+                f"({result.get('trade_count', 0)} trades)[/]"
+            )
+            continue
+
+        label = "All Pairs" if pair_key == "_combined" else pair_key
+        table = Table(title=f"Feature Importance — {label} ({result['trade_count']} trades, {result['win_rate']:.1%} WR)")
+        table.add_column("Factor", style="cyan")
+        table.add_column("Correlation", style="bold")
+        table.add_column("Win Mean", style="green")
+        table.add_column("Loss Mean", style="red")
+        table.add_column("Effect", style="bold")
+        table.add_column("SHAP", style="dim")
+
+        for name, fdata in result["factors"].items():
+            corr = fdata["point_biserial"]
+            corr_color = "green" if corr > 0 else "red"
+            effect = fdata["effect_size"]
+            effect_color = "green" if effect > 0 else "red"
+            shap_str = f"{fdata['shap_mean_abs']:.4f}" if "shap_mean_abs" in fdata else "—"
+
+            table.add_row(
+                name,
+                f"[{corr_color}]{corr:+.4f}[/{corr_color}]",
+                f"{fdata['mean_win']:.4f}",
+                f"{fdata['mean_loss']:.4f}",
+                f"[{effect_color}]{effect:+.4f}[/{effect_color}]",
+                shap_str,
+            )
+        console.print(table)
+        console.print()
+
+    if save:
+        from research import history
+        history_data = history.load()
+        saved = 0
+        for pair_key, result in results.items():
+            if pair_key == "_combined" or result.get("status") != "ok":
+                continue
+            history.update_feature_importance(history_data, pair_key, result)
+            saved += 1
+        if saved:
+            history.save(history_data)
+            console.print(f"[green]Saved feature importance for {saved} pair(s) to strategic memory[/]")
+
+
+@app.command("rollback")
+def rollback_cmd():
+    """Revert the last auto-promoted parameter change."""
+    setup_logging()
+    from research.promotion import rollback_last_auto_promotion
+
+    console.print("[yellow]Rolling back last auto-promotion...[/]")
+    if rollback_last_auto_promotion():
+        console.print("[green]Rollback successful — previous params restored[/]")
+    else:
+        console.print("[red]No rollback snapshot found[/]")
+
+
 if __name__ == "__main__":
     app()

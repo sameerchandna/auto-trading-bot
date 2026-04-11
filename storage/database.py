@@ -1,7 +1,9 @@
 """SQLite database setup and session management."""
 import json
+import logging
 import sqlite3
 from datetime import datetime
+from pathlib import Path
 from typing import Optional
 
 from sqlalchemy import (
@@ -11,6 +13,8 @@ from sqlalchemy import (
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
 from config.settings import DB_PATH
+
+logger = logging.getLogger(__name__)
 
 
 class Base(DeclarativeBase):
@@ -50,6 +54,17 @@ class SignalRecord(Base):
     rationale = Column(Text, default="{}")
     entry_timeframe = Column(String(10), default="15m")
     trigger_timeframe = Column(String(10), default="4h")
+    # Feature vector (Priority 5 — episodic memory enrichment)
+    score_htf_bias = Column(Float, nullable=True)
+    score_bos = Column(Float, nullable=True)
+    score_wave_position = Column(Float, nullable=True)
+    score_liquidity_sweep = Column(Float, nullable=True)
+    score_sr_reaction = Column(Float, nullable=True)
+    score_wave_ending = Column(Float, nullable=True)
+    score_catalyst = Column(Float, nullable=True)
+    regime = Column(String(20), nullable=True)
+    adx = Column(Float, nullable=True)
+    atr = Column(Float, nullable=True)
 
 
 class PositionRecord(Base):
@@ -135,7 +150,86 @@ class BacktestFoldsRun(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
 
-# Engine and session factory
+class EquitySnapshotRecord(Base):
+    """End-of-cycle equity snapshot for rolling performance analysis."""
+    __tablename__ = "equity_snapshots"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    timestamp = Column(DateTime, nullable=False)
+    pair = Column(String(20), nullable=True)        # NULL = account-level
+    equity = Column(Float, nullable=False)
+    cash = Column(Float, nullable=False)
+    unrealized_pnl = Column(Float, default=0.0)
+    daily_return = Column(Float, default=0.0)
+    drawdown_pct = Column(Float, default=0.0)
+    regime = Column(String(20), default="")
+    open_positions = Column(Integer, default=0)
+
+    __table_args__ = (
+        Index("ix_equity_snap_ts", "timestamp"),
+    )
+
+
+# --- Audit Log (separate DB — never blocks trading) ---
+
+AUDIT_DB_PATH = DB_PATH.parent / "audit_log.db"
+
+
+class AuditBase(DeclarativeBase):
+    pass
+
+
+class AuditLogRecord(AuditBase):
+    """Write-only audit trail of every agent decision."""
+    __tablename__ = "audit_log"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    timestamp = Column(DateTime, nullable=False)
+    agent = Column(String(30), nullable=False)
+    action = Column(String(50), nullable=False)
+    pair = Column(String(20), default="")
+    details_json = Column(Text, default="{}")
+
+    __table_args__ = (
+        Index("ix_audit_ts", "timestamp"),
+        Index("ix_audit_agent", "agent"),
+    )
+
+
+_audit_engine = None
+_AuditSessionFactory = None
+
+
+def get_audit_session() -> Session:
+    """Get a session for the audit log DB (separate from main DB)."""
+    global _audit_engine, _AuditSessionFactory
+    if _audit_engine is None:
+        AUDIT_DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+        _audit_engine = create_engine(f"sqlite:///{AUDIT_DB_PATH}", echo=False)
+        AuditBase.metadata.create_all(_audit_engine)
+    if _AuditSessionFactory is None:
+        _AuditSessionFactory = sessionmaker(bind=_audit_engine)
+    return _AuditSessionFactory()
+
+
+def log_audit(agent: str, action: str, pair: str = "", details: dict | None = None):
+    """Fire-and-forget audit log entry. Swallows exceptions — audit must never crash the pipeline."""
+    try:
+        session = get_audit_session()
+        session.add(AuditLogRecord(
+            timestamp=datetime.utcnow(),
+            agent=agent,
+            action=action,
+            pair=pair,
+            details_json=json.dumps(details or {}, default=str),
+        ))
+        session.commit()
+        session.close()
+    except Exception as e:
+        logger.debug(f"Audit log write failed (non-fatal): {e}")
+
+
+# --- Main Engine and session factory ---
 _engine = None
 _SessionFactory = None
 
@@ -153,6 +247,17 @@ def _migrate_add_pair_columns():
     bt_cols = [row[1] for row in conn.execute("PRAGMA table_info(backtest_runs)").fetchall()]
     if "fold_parent_id" not in bt_cols:
         conn.execute("ALTER TABLE backtest_runs ADD COLUMN fold_parent_id INTEGER")
+    # Signal feature vector columns (Priority 5)
+    sig_cols = [row[1] for row in conn.execute("PRAGMA table_info(signals)").fetchall()]
+    for col_name, col_type in [
+        ("score_htf_bias", "FLOAT"), ("score_bos", "FLOAT"),
+        ("score_wave_position", "FLOAT"), ("score_liquidity_sweep", "FLOAT"),
+        ("score_sr_reaction", "FLOAT"), ("score_wave_ending", "FLOAT"),
+        ("score_catalyst", "FLOAT"), ("regime", "VARCHAR(20)"),
+        ("adx", "FLOAT"), ("atr", "FLOAT"),
+    ]:
+        if col_name not in sig_cols:
+            conn.execute(f"ALTER TABLE signals ADD COLUMN {col_name} {col_type}")
     conn.commit()
     conn.close()
 
@@ -172,3 +277,18 @@ def get_session() -> Session:
     if _SessionFactory is None:
         _SessionFactory = sessionmaker(bind=get_engine())
     return _SessionFactory()
+
+
+def query_recent_closed_positions(n: int = 50) -> list[PositionRecord]:
+    """Return the last *n* closed positions ordered by closed_at DESC."""
+    session = get_session()
+    try:
+        return (
+            session.query(PositionRecord)
+            .filter_by(status="closed")
+            .order_by(PositionRecord.closed_at.desc())
+            .limit(n)
+            .all()
+        )
+    finally:
+        session.close()

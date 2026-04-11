@@ -2,6 +2,7 @@
 
 Takes a CandidateResult from backtest_runner and assigns one of:
 
+  AUTO_PROMOTED                  — passed strict gates, applied immediately (no approval needed)
   PROMOTED_CANDIDATE             — passed everything, recommended for approval
   FLAGGED_NEEDS_MANUAL_REVIEW    — passed walk-forward but OOS degraded
   FLAGGED_INSUFFICIENT_OOS_SAMPLE
@@ -15,6 +16,14 @@ Takes a CandidateResult from backtest_runner and assigns one of:
 
 Each candidate must beat BOTH the rolling baseline AND the immutable anchor
 baseline. The multi-metric gate prevents single-metric (PF only) gaming.
+
+AUTO_PROMOTED has stricter gates than PROMOTED_CANDIDATE:
+  - 100% walk-forward window pass rate (not just 75%)
+  - PF > 1.5 in every individual window
+  - Median WR > 45%
+  - Median DD < 30%
+  - OOS PF degradation < 15% (not 25%)
+  - Not flagged suspicious or at param bound
 """
 from __future__ import annotations
 
@@ -33,6 +42,12 @@ MAX_WIN_RATE_DEGRADATION = 0.10       # 10%
 MAX_DRAWDOWN_DEGRADATION = 0.10       # 10%
 SUSPICIOUS_IMPROVEMENT_PCT = 0.30     # 30%
 OOS_DEGRADATION_THRESHOLD = 0.25      # 25%
+
+# Auto-promotion thresholds (stricter than PROMOTED_CANDIDATE)
+AUTO_PROMOTE_MIN_PF_PER_WINDOW = 1.50    # every window, not just median
+AUTO_PROMOTE_MIN_MEDIAN_WR = 0.45        # 45%
+AUTO_PROMOTE_MAX_MEDIAN_DD = 0.30        # 30%
+AUTO_PROMOTE_MAX_OOS_DEGRADATION = 0.15  # 15% (vs 25% for normal)
 
 # When tests_this_quarter exceeds this, escalate the bar
 ESCALATION_TESTS_THRESHOLD = 500
@@ -116,6 +131,45 @@ def _multi_metric_gate(
         if dd_increase > MAX_DRAWDOWN_DEGRADATION:
             return False, f"{label}: DD increased {dd_increase:.1%} > {MAX_DRAWDOWN_DEGRADATION:.0%}"
     return True, None
+
+
+def _check_auto_promote(
+    result: CandidateResult,
+    cand_pf: float, cand_wr: float, cand_dd: float, oos_pf: float,
+    delta_anchor: dict, delta_rolling: dict,
+) -> Verdict | None:
+    """Return AUTO_PROMOTED verdict if candidate clears the strict gate, else None."""
+    # 100% walk-forward pass rate
+    if result.walk_forward_pass_rate < 1.0:
+        return None
+
+    # Every individual window must have PF >= threshold
+    for w in result.window_results:
+        window_pf = w.val_metrics.get("profit_factor", 0.0)
+        if window_pf < AUTO_PROMOTE_MIN_PF_PER_WINDOW:
+            return None
+
+    # Median metrics
+    if cand_wr < AUTO_PROMOTE_MIN_MEDIAN_WR:
+        return None
+    if cand_dd > AUTO_PROMOTE_MAX_MEDIAN_DD:
+        return None
+
+    # OOS degradation (stricter)
+    if cand_pf > 0:
+        oos_drop = (cand_pf - oos_pf) / cand_pf
+        if oos_drop > AUTO_PROMOTE_MAX_OOS_DEGRADATION:
+            return None
+
+    return Verdict(
+        code="AUTO_PROMOTED",
+        reason=(
+            f"auto-promoted: PF {cand_pf:.3f} (all windows >= {AUTO_PROMOTE_MIN_PF_PER_WINDOW}), "
+            f"WR {cand_wr:.1%}, DD {cand_dd:.1%}, OOS PF {oos_pf:.3f}"
+        ),
+        delta_vs_anchor=delta_anchor,
+        delta_vs_rolling=delta_rolling,
+    )
 
 
 def evaluate(result: CandidateResult, data: dict) -> Verdict:
@@ -230,6 +284,14 @@ def evaluate(result: CandidateResult, data: dict) -> Verdict:
                 delta_vs_anchor=delta_anchor,
                 delta_vs_rolling=delta_rolling,
             )
+
+    # Check if candidate qualifies for auto-promotion (stricter gates)
+    auto_verdict = _check_auto_promote(
+        result, cand_pf, cand_wr, cand_dd, oos_pf,
+        delta_anchor, delta_rolling,
+    )
+    if auto_verdict is not None:
+        return auto_verdict
 
     return Verdict(
         code="PROMOTED_CANDIDATE",

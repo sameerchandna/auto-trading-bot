@@ -12,6 +12,22 @@
   "sl_multiplier": 1.5,
   "tp_risk_reward": 2.0,
   "swing_lookback": 6,
+  "regime_filter_enabled": false,
+  "regime_adx_threshold": 25.0,
+  "signal_model_enabled": false,
+  "signal_model_min_confidence": 0.5,
+  "news_filter_enabled": false,
+  "news_block_before_mins": 30,
+  "news_block_after_mins": 15,
+  "auto_promote_enabled": false,
+  "learner_enabled": false,
+  "regime_params_enabled": false,
+  "atr_volatility_threshold": 80.0,
+  "regime_params": {
+    "trending": {},
+    "ranging": {},
+    "volatile": {}
+  },
   "backtest_results": {
     "period": "2023-01-01 to 2026-04-03",
     "config": "no-overlap, block-h[17,18,19,20]",

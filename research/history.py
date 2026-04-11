@@ -113,3 +113,74 @@ def get_anchor_baseline(data: dict) -> dict:
 
 def get_rolling_baseline(data: dict) -> dict:
     return data["rolling_baseline"]
+
+
+# --- Strategic Memory (Tier 3) ---
+
+def _empty_asset_insights() -> dict:
+    return {
+        "rolling_90d_summary": {},
+        "per_regime_performance": {},
+        "feature_importance": {},
+    }
+
+
+def get_strategy_insights(data: dict, pair: str | None = None) -> dict:
+    """Return strategy_insights section, creating if absent.
+
+    If pair is given, return the per-asset sub-dict.
+    Top-level also has 'learner_proposals_history' (shared across assets).
+    """
+    insights = data.setdefault("strategy_insights", {
+        "learner_proposals_history": [],
+    })
+    if pair is None:
+        return insights
+    return insights.setdefault(pair, _empty_asset_insights())
+
+
+def update_rolling_90d_summary(data: dict, pair: str, metrics: dict) -> None:
+    """Update rolling 90-day performance summary for a specific asset.
+
+    metrics: {win_rate, profit_factor, expectancy_pips, avg_hold_minutes, total_trades}
+    """
+    asset_insights = get_strategy_insights(data, pair)
+    asset_insights["rolling_90d_summary"] = {
+        **metrics,
+        "computed_at": _utcnow_iso(),
+    }
+
+
+def update_regime_performance(data: dict, pair: str, regime: str, metrics: dict) -> None:
+    """Update per-regime performance breakdown for a specific asset."""
+    asset_insights = get_strategy_insights(data, pair)
+    asset_insights["per_regime_performance"][regime] = {
+        **metrics,
+        "updated_at": _utcnow_iso(),
+    }
+
+
+def update_feature_importance(data: dict, pair: str, importance: dict) -> None:
+    """Update feature importance analysis for a specific asset.
+
+    importance: output from analysis.feature_importance.compute_feature_importance()
+    """
+    asset_insights = get_strategy_insights(data, pair)
+    asset_insights["feature_importance"] = importance
+
+
+def get_feature_importance(data: dict, pair: str) -> dict:
+    """Return stored feature importance for an asset (empty dict if not computed)."""
+    asset_insights = get_strategy_insights(data, pair)
+    return asset_insights.get("feature_importance", {})
+
+
+def record_learner_proposal(data: dict, proposal: dict) -> None:
+    """Append a learner proposal to shared history (across all assets)."""
+    insights = get_strategy_insights(data)
+    insights.setdefault("learner_proposals_history", []).append({
+        **proposal,
+        "proposed_at": _utcnow_iso(),
+    })
+    # Keep last 50
+    insights["learner_proposals_history"] = insights["learner_proposals_history"][-50:]

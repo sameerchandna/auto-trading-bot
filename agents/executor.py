@@ -8,7 +8,7 @@ from dotenv import load_dotenv
 
 from agents.base import BaseAgent
 from data.models import Position, TradeStatus, Direction
-from storage.database import PositionRecord, SignalRecord, get_session
+from storage.database import PositionRecord, SignalRecord, get_session, log_audit
 from engine.event_bus import bus
 from config.assets import get_asset, resolve_pair_name
 
@@ -66,6 +66,14 @@ class ExecutorAgent(BaseAgent):
                 "oanda_trade_id": oanda_trade_id,
             })
 
+            log_audit("executor", "trade_executed", pair=position.signal.pair, details={
+                "direction": position.signal.direction.value,
+                "entry_price": position.entry_price,
+                "size": position.size,
+                "confluence": position.signal.confluence_score,
+                "oanda_trade_id": oanda_trade_id,
+            })
+
         return {"executed": executed}
 
     def _execute_oanda(self, position: Position) -> str | None:
@@ -110,6 +118,7 @@ class ExecutorAgent(BaseAgent):
         """Save trade to database."""
         session = get_session()
         try:
+            scores = position.signal.rationale.get("scores", {})
             signal_rec = SignalRecord(
                 timestamp=position.signal.timestamp,
                 pair=position.signal.pair,
@@ -122,6 +131,17 @@ class ExecutorAgent(BaseAgent):
                 rationale=json.dumps(position.signal.rationale),
                 entry_timeframe=position.signal.entry_timeframe,
                 trigger_timeframe=position.signal.trigger_timeframe,
+                # Feature vector for episodic memory
+                score_htf_bias=scores.get("htf_bias"),
+                score_bos=scores.get("bos"),
+                score_wave_position=scores.get("wave_position"),
+                score_liquidity_sweep=scores.get("liquidity_sweep"),
+                score_sr_reaction=scores.get("sr_reaction"),
+                score_wave_ending=scores.get("wave_ending"),
+                score_catalyst=scores.get("catalyst"),
+                regime=position.signal.rationale.get("regime"),
+                adx=position.signal.rationale.get("adx"),
+                atr=position.signal.rationale.get("atr"),
             )
             session.add(signal_rec)
             session.flush()

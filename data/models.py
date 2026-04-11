@@ -41,6 +41,12 @@ class SignalType(str, Enum):
     WAVE_ENDING = "wave_ending"
 
 
+class Regime(str, Enum):
+    TRENDING = "trending"
+    RANGING = "ranging"
+    VOLATILE = "volatile"
+
+
 class TradeStatus(str, Enum):
     OPEN = "open"
     CLOSED = "closed"
@@ -135,6 +141,7 @@ class TimeframeAnalysis(BaseModel):
     sr_zones: list[SRZone] = Field(default_factory=list)
     liquidity_sweeps: list[LiquiditySweep] = Field(default_factory=list)
     atr: float = 0.0
+    adx: float = 0.0
     current_price: float = 0.0
 
 
@@ -145,6 +152,7 @@ class PriceContext(BaseModel):
     analyses: dict[str, TimeframeAnalysis] = Field(default_factory=dict)
     overall_bias: Bias = Bias.RANGING
     bias_strength: float = 0.0  # 0-1, how aligned are the timeframes
+    regime: Regime = Regime.TRENDING  # default to trending (no filter effect)
 
     def get_htf_bias(self) -> Bias:
         """Get bias from daily + weekly."""
@@ -222,3 +230,39 @@ class ParameterSet(BaseModel):
     tp_risk_reward: float = 2.0
     confluence_weights: dict[str, float] = Field(default_factory=dict)
     performance_score: float = 0.0
+
+
+# --- Memory: Per-Cycle Context ---
+
+class CycleSignalRecord(BaseModel):
+    """A signal's lifecycle within one cycle."""
+    signal: Signal
+    generated: bool = True
+    filtered_reason: Optional[str] = None
+    executed: bool = False
+
+
+class CycleContext(BaseModel):
+    """Ephemeral per-cycle context passed through all agents via data['cycle'].
+
+    Created at the start of _run_pair(), populated as the pipeline progresses,
+    discarded after the cycle completes. Never persisted directly.
+    """
+    pair: str
+    timestamp: datetime = Field(default_factory=datetime.utcnow)
+    # From analyzer
+    regime: Optional[Regime] = None
+    regime_confidence: float = 0.0          # ADX value as proxy
+    overall_bias: Optional[Bias] = None
+    bias_strength: float = 0.0
+    # Signals lifecycle
+    signals_generated: list[CycleSignalRecord] = Field(default_factory=list)
+    signals_filtered: list[CycleSignalRecord] = Field(default_factory=list)
+    signals_executed: list[CycleSignalRecord] = Field(default_factory=list)
+    # Positions snapshot at cycle start
+    open_positions_count: int = 0
+    open_position_ids: list[int] = Field(default_factory=list)
+    # Account state at cycle start
+    equity: float = 0.0
+    daily_pnl: float = 0.0
+    drawdown_pct: float = 0.0

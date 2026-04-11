@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "last_updated": "2026-04-08T23:17:42Z",
+  "last_updated": "2026-04-11T13:46:08Z",
   "anchor_baseline": {
     "params_hash": null,
     "params": {
@@ -31,9 +31,9 @@
     "note": "Immutable production config locked 2026-04-02. Only updated manually, at most quarterly."
   },
   "rolling_baseline": {
-    "params_hash": "sha1:2ccaad564aeb1e43",
+    "params_hash": "sha1:8654aad092d87f8b",
     "source": "config/optimized_params.json",
-    "synced_at": "2026-04-08T23:12:29Z",
+    "synced_at": "2026-04-11T13:30:20Z",
     "note": "Mirrors current optimized_params.json. Updated automatically after each approved promotion.",
     "params": {
       "weights": {
@@ -49,6 +49,13 @@
       "sl_multiplier": 1.5,
       "tp_risk_reward": 2.0,
       "swing_lookback": 6,
+      "regime_filter_enabled": false,
+      "regime_adx_threshold": 25.0,
+      "signal_model_enabled": false,
+      "signal_model_min_confidence": 0.5,
+      "news_filter_enabled": false,
+      "news_block_before_mins": 30,
+      "news_block_after_mins": 15,
       "sl_method": "atr"
     }
   },
@@ -86,7 +93,7 @@
   "budget": {
     "max_combinations_per_day": 5,
     "max_structural_params_per_run": 2,
-    "tests_this_quarter": 2,
+    "tests_this_quarter": 12,
     "escalate_bar_after": 500,
     "quarter_started_at": "2026-04-01T00:00:00Z"
   },
@@ -312,7 +319,1185 @@
       "delta_vs_anchor": null,
       "delta_vs_rolling": null,
       "approval": null
+    },
+    {
+      "id": "T-2026-04-10-001",
+      "params_hash": "sha1:e8a9ad22f52c8533",
+      "params": {
+        "weights": {
+          "htf_bias": 0.3338,
+          "bos": 0.1017,
+          "wave_position": 0.1539,
+          "liquidity_sweep": 0.193,
+          "sr_reaction": 0.1604,
+          "wave_ending": 0.0572,
+          "catalyst": 0.0
+        },
+        "threshold": 0.45,
+        "sl_multiplier": 1.5,
+        "tp_risk_reward": 2.25,
+        "swing_lookback": 6,
+        "sl_method": "atr"
+      },
+      "mutation": "tp_risk_reward 2.0->2.25",
+      "tested_at": "2026-04-10T08:12:32Z",
+      "windows": [
+        {
+          "window_id": "W1",
+          "period": "IS:2023-01-01..2023-06-30 VAL:2023-07-01..2023-12-31",
+          "is": {
+            "trades": 264,
+            "win_rate": 0.4128787878787879,
+            "profit_factor": 1.46,
+            "expectancy_pips": 2.6,
+            "max_drawdown_pct": 0.3082,
+            "total_pnl": 10728.55,
+            "sharpe_ratio": 2.08
+          },
+          "val": {
+            "trades": 545,
+            "win_rate": 0.3926605504587156,
+            "profit_factor": 1.39,
+            "expectancy_pips": 2.6,
+            "max_drawdown_pct": 0.2701,
+            "total_pnl": 20385.51,
+            "sharpe_ratio": 2.71
+          },
+          "passed": true,
+          "fail_reason": null
+        },
+        {
+          "window_id": "W2",
+          "period": "IS:2024-01-01..2024-06-30 VAL:2024-07-01..2024-12-31",
+          "is": {
+            "trades": 471,
+            "win_rate": 0.3248407643312102,
+            "profit_factor": 1.06,
+            "expectancy_pips": 0.4,
+            "max_drawdown_pct": 0.366,
+            "total_pnl": 2169.49,
+            "sharpe_ratio": 0.77
+          },
+          "val": {
+            "trades": 425,
+            "win_rate": 0.31058823529411766,
+            "profit_factor": 0.96,
+            "expectancy_pips": -0.5,
+            "max_drawdown_pct": 0.4828,
+            "total_pnl": -1400.37,
+            "sharpe_ratio": -0.01
+          },
+          "passed": false,
+          "fail_reason": "val_pf=0.960 <= baseline_pf=1.340"
+        },
+        {
+          "window_id": "W3",
+          "period": "IS:2025-01-01..2025-06-30 VAL:2025-07-01..2025-12-31",
+          "is": {
+            "trades": 533,
+            "win_rate": 0.44652908067542213,
+            "profit_factor": 1.72,
+            "expectancy_pips": 6.3,
+            "max_drawdown_pct": 0.2241,
+            "total_pnl": 45300.75,
+            "sharpe_ratio": 3.6
+          },
+          "val": {
+            "trades": 484,
+            "win_rate": 0.36363636363636365,
+            "profit_factor": 1.18,
+            "expectancy_pips": 1.2,
+            "max_drawdown_pct": 0.2891,
+            "total_pnl": 7581.77,
+            "sharpe_ratio": 1.45
+          },
+          "passed": false,
+          "fail_reason": "val_pf=1.180 <= baseline_pf=1.340"
+        }
+      ],
+      "walk_forward_pass_rate": 0.3333333333333333,
+      "aggregate": {
+        "median_profit_factor": 1.18,
+        "median_win_rate": 0.36363636363636365,
+        "median_max_drawdown_pct": 0.2891,
+        "median_expectancy_pips": 1.2,
+        "windows_with_data": 3
+      },
+      "oos": null,
+      "error": null,
+      "verdict": "REJECTED_WALK_FORWARD",
+      "verdict_reason": "passed 1/3 windows (33%) < 75%",
+      "delta_vs_anchor": null,
+      "delta_vs_rolling": null,
+      "approval": null
+    },
+    {
+      "id": "T-2026-04-10-002",
+      "params_hash": "sha1:f722541e8103abc7",
+      "params": {
+        "weights": {
+          "htf_bias": 0.3338,
+          "bos": 0.1017,
+          "wave_position": 0.1539,
+          "liquidity_sweep": 0.193,
+          "sr_reaction": 0.1604,
+          "wave_ending": 0.0572,
+          "catalyst": 0.0
+        },
+        "threshold": 0.45,
+        "sl_multiplier": 1.5,
+        "tp_risk_reward": 1.75,
+        "swing_lookback": 6,
+        "sl_method": "atr"
+      },
+      "mutation": "tp_risk_reward 2.0->1.75",
+      "tested_at": "2026-04-10T08:12:32Z",
+      "windows": [
+        {
+          "window_id": "W1",
+          "period": "IS:2023-01-01..2023-06-30 VAL:2023-07-01..2023-12-31",
+          "is": {
+            "trades": 284,
+            "win_rate": 0.45422535211267606,
+            "profit_factor": 1.36,
+            "expectancy_pips": 1.8,
+            "max_drawdown_pct": 0.306,
+            "total_pnl": 8256.17,
+            "sharpe_ratio": 1.81
+          },
+          "val": {
+            "trades": 627,
+            "win_rate": 0.44976076555023925,
+            "profit_factor": 1.33,
+            "expectancy_pips": 1.9,
+            "max_drawdown_pct": 0.2788,
+            "total_pnl": 17673.1,
+            "sharpe_ratio": 2.54
+          },
+          "passed": false,
+          "fail_reason": "val_pf=1.330 <= baseline_pf=1.340"
+        },
+        {
+          "window_id": "W2",
+          "period": "IS:2024-01-01..2024-06-30 VAL:2024-07-01..2024-12-31",
+          "is": {
+            "trades": 521,
+            "win_rate": 0.3896353166986564,
+            "profit_factor": 1.12,
+            "expectancy_pips": 0.5,
+            "max_drawdown_pct": 0.2196,
+            "total_pnl": 4318.99,
+            "sharpe_ratio": 1.23
+          },
+          "val": {
+            "trades": 501,
+            "win_rate": 0.37924151696606784,
+            "profit_factor": 1.04,
+            "expectancy_pips": -0.2,
+            "max_drawdown_pct": 0.4301,
+            "total_pnl": 1265.02,
+            "sharpe_ratio": 0.58
+          },
+          "passed": false,
+          "fail_reason": "val_pf=1.040 <= baseline_pf=1.340"
+        },
+        {
+          "window_id": "W3",
+          "period": "IS:2025-01-01..2025-06-30 VAL:2025-07-01..2025-12-31",
+          "is": {
+            "trades": 597,
+            "win_rate": 0.47738693467336685,
+            "profit_factor": 1.52,
+            "expectancy_pips": 4.3,
+            "max_drawdown_pct": 0.2818,
+            "total_pnl": 30551.5,
+            "sharpe_ratio": 3.06
+          },
+          "val": {
+            "trades": 543,
+            "win_rate": 0.4143646408839779,
+            "profit_factor": 1.19,
+            "expectancy_pips": 1.0,
+            "max_drawdown_pct": 0.2694,
+            "total_pnl": 8216.33,
+            "sharpe_ratio": 1.53
+          },
+          "passed": false,
+          "fail_reason": "val_pf=1.190 <= baseline_pf=1.340"
+        }
+      ],
+      "walk_forward_pass_rate": 0.0,
+      "aggregate": {
+        "median_profit_factor": 1.19,
+        "median_win_rate": 0.4143646408839779,
+        "median_max_drawdown_pct": 0.2788,
+        "median_expectancy_pips": 1.0,
+        "windows_with_data": 3
+      },
+      "oos": null,
+      "error": null,
+      "verdict": "REJECTED_WALK_FORWARD",
+      "verdict_reason": "passed 0/3 windows (0%) < 75%",
+      "delta_vs_anchor": null,
+      "delta_vs_rolling": null,
+      "approval": null
+    },
+    {
+      "id": "T-2026-04-10-003",
+      "params_hash": "sha1:3da277ef6e604bc8",
+      "params": {
+        "weights": {
+          "htf_bias": 0.3338,
+          "bos": 0.1017,
+          "wave_position": 0.1539,
+          "liquidity_sweep": 0.193,
+          "sr_reaction": 0.1604,
+          "wave_ending": 0.0572,
+          "catalyst": 0.0
+        },
+        "threshold": 0.45,
+        "sl_multiplier": 1.5,
+        "tp_risk_reward": 2.0,
+        "swing_lookback": 7,
+        "sl_method": "atr"
+      },
+      "mutation": "swing_lookback 6->7",
+      "tested_at": "2026-04-10T08:12:32Z",
+      "windows": [
+        {
+          "window_id": "W1",
+          "period": "IS:2023-01-01..2023-06-30 VAL:2023-07-01..2023-12-31",
+          "is": {
+            "trades": 282,
+            "win_rate": 0.42907801418439717,
+            "profit_factor": 1.39,
+            "expectancy_pips": 1.9,
+            "max_drawdown_pct": 0.2931,
+            "total_pnl": 9198.26,
+            "sharpe_ratio": 1.87
+          },
+          "val": {
+            "trades": 559,
+            "win_rate": 0.43112701252236135,
+            "profit_factor": 1.41,
+            "expectancy_pips": 2.6,
+            "max_drawdown_pct": 0.2595,
+            "total_pnl": 21298.25,
+            "sharpe_ratio": 2.93
+          },
+          "passed": true,
+          "fail_reason": null
+        },
+        {
+          "window_id": "W2",
+          "period": "IS:2024-01-01..2024-06-30 VAL:2024-07-01..2024-12-31",
+          "is": {
+            "trades": 481,
+            "win_rate": 0.35135135135135137,
+            "profit_factor": 1.08,
+            "expectancy_pips": 0.4,
+            "max_drawdown_pct": 0.3382,
+            "total_pnl": 2647.42,
+            "sharpe_ratio": 0.89
+          },
+          "val": {
+            "trades": 477,
+            "win_rate": 0.34591194968553457,
+            "profit_factor": 1.0,
+            "expectancy_pips": -0.4,
+            "max_drawdown_pct": 0.4892,
+            "total_pnl": 9.78,
+            "sharpe_ratio": 0.33
+          },
+          "passed": false,
+          "fail_reason": "val_pf=1.000 <= baseline_pf=1.340"
+        },
+        {
+          "window_id": "W3",
+          "period": "IS:2025-01-01..2025-06-30 VAL:2025-07-01..2025-12-31",
+          "is": {
+            "trades": 563,
+            "win_rate": 0.4511545293072824,
+            "profit_factor": 1.54,
+            "expectancy_pips": 4.6,
+            "max_drawdown_pct": 0.2543,
+            "total_pnl": 32436.73,
+            "sharpe_ratio": 3.11
+          },
+          "val": {
+            "trades": 502,
+            "win_rate": 0.39641434262948205,
+            "profit_factor": 1.24,
+            "expectancy_pips": 1.6,
+            "max_drawdown_pct": 0.2416,
+            "total_pnl": 10244.48,
+            "sharpe_ratio": 1.68
+          },
+          "passed": false,
+          "fail_reason": "val_pf=1.240 <= baseline_pf=1.340"
+        }
+      ],
+      "walk_forward_pass_rate": 0.3333333333333333,
+      "aggregate": {
+        "median_profit_factor": 1.24,
+        "median_win_rate": 0.39641434262948205,
+        "median_max_drawdown_pct": 0.2595,
+        "median_expectancy_pips": 1.6,
+        "windows_with_data": 3
+      },
+      "oos": null,
+      "error": null,
+      "verdict": "REJECTED_WALK_FORWARD",
+      "verdict_reason": "passed 1/3 windows (33%) < 75%",
+      "delta_vs_anchor": null,
+      "delta_vs_rolling": null,
+      "approval": null
+    },
+    {
+      "id": "T-2026-04-10-004",
+      "params_hash": "sha1:5ce0f23099d63a86",
+      "params": {
+        "weights": {
+          "htf_bias": 0.3338,
+          "bos": 0.1017,
+          "wave_position": 0.1539,
+          "liquidity_sweep": 0.193,
+          "sr_reaction": 0.1604,
+          "wave_ending": 0.0572,
+          "catalyst": 0.0
+        },
+        "threshold": 0.45,
+        "sl_multiplier": 1.25,
+        "tp_risk_reward": 2.0,
+        "swing_lookback": 6,
+        "sl_method": "atr"
+      },
+      "mutation": "sl_multiplier 1.5->1.25",
+      "tested_at": "2026-04-10T08:12:32Z",
+      "windows": [
+        {
+          "window_id": "W1",
+          "period": "IS:2023-01-01..2023-06-30 VAL:2023-07-01..2023-12-31",
+          "is": {
+            "trades": 299,
+            "win_rate": 0.411371237458194,
+            "profit_factor": 1.29,
+            "expectancy_pips": 1.2,
+            "max_drawdown_pct": 0.2837,
+            "total_pnl": 6782.31,
+            "sharpe_ratio": 1.6
+          },
+          "val": {
+            "trades": 665,
+            "win_rate": 0.4330827067669173,
+            "profit_factor": 1.43,
+            "expectancy_pips": 2.2,
+            "max_drawdown_pct": 0.1976,
+            "total_pnl": 22593.68,
+            "sharpe_ratio": 3.02
+          },
+          "passed": true,
+          "fail_reason": null
+        },
+        {
+          "window_id": "W2",
+          "period": "IS:2024-01-01..2024-06-30 VAL:2024-07-01..2024-12-31",
+          "is": {
+            "trades": 579,
+            "win_rate": 0.40241796200345425,
+            "profit_factor": 1.3,
+            "expectancy_pips": 1.2,
+            "max_drawdown_pct": 0.1806,
+            "total_pnl": 10444.5,
+            "sharpe_ratio": 2.46
+          },
+          "val": {
+            "trades": 542,
+            "win_rate": 0.37084870848708484,
+            "profit_factor": 1.1,
+            "expectancy_pips": 0.5,
+            "max_drawdown_pct": 0.3452,
+            "total_pnl": 4116.47,
+            "sharpe_ratio": 1.1
+          },
+          "passed": false,
+          "fail_reason": "val_pf=1.100 <= baseline_pf=1.340"
+        },
+        {
+          "window_id": "W3",
+          "period": "IS:2025-01-01..2025-06-30 VAL:2025-07-01..2025-12-31",
+          "is": {
+            "trades": 688,
+            "win_rate": 0.47093023255813954,
+            "profit_factor": 1.71,
+            "expectancy_pips": 5.1,
+            "max_drawdown_pct": 0.1762,
+            "total_pnl": 46004.77,
+            "sharpe_ratio": 3.95
+          },
+          "val": {
+            "trades": 602,
+            "win_rate": 0.4003322259136213,
+            "profit_factor": 1.21,
+            "expectancy_pips": 1.0,
+            "max_drawdown_pct": 0.2245,
+            "total_pnl": 9424.74,
+            "sharpe_ratio": 1.63
+          },
+          "passed": false,
+          "fail_reason": "val_pf=1.210 <= baseline_pf=1.340"
+        }
+      ],
+      "walk_forward_pass_rate": 0.3333333333333333,
+      "aggregate": {
+        "median_profit_factor": 1.21,
+        "median_win_rate": 0.4003322259136213,
+        "median_max_drawdown_pct": 0.2245,
+        "median_expectancy_pips": 1.0,
+        "windows_with_data": 3
+      },
+      "oos": null,
+      "error": null,
+      "verdict": "REJECTED_WALK_FORWARD",
+      "verdict_reason": "passed 1/3 windows (33%) < 75%",
+      "delta_vs_anchor": null,
+      "delta_vs_rolling": null,
+      "approval": null
+    },
+    {
+      "id": "T-2026-04-10-005",
+      "params_hash": "sha1:dcf1ea33d46c6020",
+      "params": {
+        "weights": {
+          "htf_bias": 0.3338,
+          "bos": 0.1017,
+          "wave_position": 0.1539,
+          "liquidity_sweep": 0.193,
+          "sr_reaction": 0.1604,
+          "wave_ending": 0.0572,
+          "catalyst": 0.0
+        },
+        "threshold": 0.5,
+        "sl_multiplier": 1.5,
+        "tp_risk_reward": 2.0,
+        "swing_lookback": 6,
+        "sl_method": "atr"
+      },
+      "mutation": "threshold 0.45->0.5",
+      "tested_at": "2026-04-10T08:12:32Z",
+      "windows": [
+        {
+          "window_id": "W1",
+          "period": "IS:2023-01-01..2023-06-30 VAL:2023-07-01..2023-12-31",
+          "is": {
+            "trades": 133,
+            "win_rate": 0.48120300751879697,
+            "profit_factor": 1.54,
+            "expectancy_pips": 3.1,
+            "max_drawdown_pct": 0.1521,
+            "total_pnl": 6155.14,
+            "sharpe_ratio": 1.59
+          },
+          "val": {
+            "trades": 338,
+            "win_rate": 0.4171597633136095,
+            "profit_factor": 1.38,
+            "expectancy_pips": 2.5,
+            "max_drawdown_pct": 0.268,
+            "total_pnl": 11424.62,
+            "sharpe_ratio": 2.07
+          },
+          "passed": true,
+          "fail_reason": null
+        },
+        {
+          "window_id": "W2",
+          "period": "IS:2024-01-01..2024-06-30 VAL:2024-07-01..2024-12-31",
+          "is": {
+            "trades": 360,
+            "win_rate": 0.3638888888888889,
+            "profit_factor": 1.14,
+            "expectancy_pips": 0.8,
+            "max_drawdown_pct": 0.2209,
+            "total_pnl": 3614.41,
+            "sharpe_ratio": 1.1
+          },
+          "val": {
+            "trades": 314,
+            "win_rate": 0.3535031847133758,
+            "profit_factor": 1.06,
+            "expectancy_pips": 0.2,
+            "max_drawdown_pct": 0.3823,
+            "total_pnl": 1380.62,
+            "sharpe_ratio": 0.58
+          },
+          "passed": false,
+          "fail_reason": "val_pf=1.060 <= baseline_pf=1.340"
+        },
+        {
+          "window_id": "W3",
+          "period": "IS:2025-01-01..2025-06-30 VAL:2025-07-01..2025-12-31",
+          "is": {
+            "trades": 341,
+            "win_rate": 0.45454545454545453,
+            "profit_factor": 1.54,
+            "expectancy_pips": 5.1,
+            "max_drawdown_pct": 0.2105,
+            "total_pnl": 19329.68,
+            "sharpe_ratio": 2.67
+          },
+          "val": {
+            "trades": 326,
+            "win_rate": 0.4294478527607362,
+            "profit_factor": 1.4,
+            "expectancy_pips": 2.0,
+            "max_drawdown_pct": 0.2705,
+            "total_pnl": 10646.69,
+            "sharpe_ratio": 1.75
+          },
+          "passed": true,
+          "fail_reason": null
+        }
+      ],
+      "walk_forward_pass_rate": 0.6666666666666666,
+      "aggregate": {
+        "median_profit_factor": 1.38,
+        "median_win_rate": 0.4171597633136095,
+        "median_max_drawdown_pct": 0.2705,
+        "median_expectancy_pips": 2.0,
+        "windows_with_data": 3
+      },
+      "oos": null,
+      "error": null,
+      "verdict": "REJECTED_WALK_FORWARD",
+      "verdict_reason": "passed 2/3 windows (67%) < 75%",
+      "delta_vs_anchor": null,
+      "delta_vs_rolling": null,
+      "approval": null
+    },
+    {
+      "id": "T-2026-04-11-001",
+      "params_hash": "sha1:65725aeb6630534b",
+      "params": {
+        "weights": {
+          "htf_bias": 0.3338,
+          "bos": 0.1017,
+          "wave_position": 0.1539,
+          "liquidity_sweep": 0.193,
+          "sr_reaction": 0.1604,
+          "wave_ending": 0.0572,
+          "catalyst": 0.0
+        },
+        "threshold": 0.45,
+        "sl_multiplier": 1.25,
+        "tp_risk_reward": 2.0,
+        "swing_lookback": 6,
+        "regime_filter_enabled": false,
+        "regime_adx_threshold": 25.0,
+        "signal_model_enabled": false,
+        "signal_model_min_confidence": 0.5,
+        "news_filter_enabled": false,
+        "news_block_before_mins": 30,
+        "news_block_after_mins": 15,
+        "sl_method": "atr"
+      },
+      "mutation": "sl_multiplier 1.5->1.25",
+      "tested_at": "2026-04-11T13:46:08Z",
+      "windows": [
+        {
+          "window_id": "W1",
+          "period": "IS:2023-01-01..2023-06-30 VAL:2023-07-01..2023-12-31",
+          "is": {
+            "trades": 299,
+            "win_rate": 0.411371237458194,
+            "profit_factor": 1.29,
+            "expectancy_pips": 1.2,
+            "max_drawdown_pct": 0.2837,
+            "total_pnl": 6782.31,
+            "sharpe_ratio": 1.6
+          },
+          "val": {
+            "trades": 665,
+            "win_rate": 0.4330827067669173,
+            "profit_factor": 1.43,
+            "expectancy_pips": 2.2,
+            "max_drawdown_pct": 0.1976,
+            "total_pnl": 22593.68,
+            "sharpe_ratio": 3.02
+          },
+          "passed": true,
+          "fail_reason": null
+        },
+        {
+          "window_id": "W2",
+          "period": "IS:2024-01-01..2024-06-30 VAL:2024-07-01..2024-12-31",
+          "is": {
+            "trades": 579,
+            "win_rate": 0.40241796200345425,
+            "profit_factor": 1.3,
+            "expectancy_pips": 1.2,
+            "max_drawdown_pct": 0.1806,
+            "total_pnl": 10444.5,
+            "sharpe_ratio": 2.46
+          },
+          "val": {
+            "trades": 542,
+            "win_rate": 0.37084870848708484,
+            "profit_factor": 1.1,
+            "expectancy_pips": 0.5,
+            "max_drawdown_pct": 0.3452,
+            "total_pnl": 4116.47,
+            "sharpe_ratio": 1.1
+          },
+          "passed": false,
+          "fail_reason": "val_pf=1.100 <= baseline_pf=1.340"
+        },
+        {
+          "window_id": "W3",
+          "period": "IS:2025-01-01..2025-06-30 VAL:2025-07-01..2025-12-31",
+          "is": {
+            "trades": 688,
+            "win_rate": 0.47093023255813954,
+            "profit_factor": 1.71,
+            "expectancy_pips": 5.1,
+            "max_drawdown_pct": 0.1762,
+            "total_pnl": 46004.77,
+            "sharpe_ratio": 3.95
+          },
+          "val": {
+            "trades": 602,
+            "win_rate": 0.4003322259136213,
+            "profit_factor": 1.21,
+            "expectancy_pips": 1.0,
+            "max_drawdown_pct": 0.2245,
+            "total_pnl": 9424.74,
+            "sharpe_ratio": 1.63
+          },
+          "passed": false,
+          "fail_reason": "val_pf=1.210 <= baseline_pf=1.340"
+        }
+      ],
+      "walk_forward_pass_rate": 0.3333333333333333,
+      "aggregate": {
+        "median_profit_factor": 1.21,
+        "median_win_rate": 0.4003322259136213,
+        "median_max_drawdown_pct": 0.2245,
+        "median_expectancy_pips": 1.0,
+        "windows_with_data": 3
+      },
+      "oos": null,
+      "error": null,
+      "verdict": "REJECTED_WALK_FORWARD",
+      "verdict_reason": "passed 1/3 windows (33%) < 75%",
+      "delta_vs_anchor": null,
+      "delta_vs_rolling": null,
+      "approval": null
+    },
+    {
+      "id": "T-2026-04-11-002",
+      "params_hash": "sha1:017222cc26cd9b9f",
+      "params": {
+        "weights": {
+          "htf_bias": 0.3338,
+          "bos": 0.1017,
+          "wave_position": 0.1539,
+          "liquidity_sweep": 0.193,
+          "sr_reaction": 0.1604,
+          "wave_ending": 0.0572,
+          "catalyst": 0.0
+        },
+        "threshold": 0.45,
+        "sl_multiplier": 1.5,
+        "tp_risk_reward": 2.0,
+        "swing_lookback": 6,
+        "regime_filter_enabled": false,
+        "regime_adx_threshold": 25.0,
+        "signal_model_enabled": true,
+        "signal_model_min_confidence": 0.5,
+        "news_filter_enabled": false,
+        "news_block_before_mins": 30,
+        "news_block_after_mins": 15,
+        "sl_method": "atr"
+      },
+      "mutation": "signal_model ON",
+      "tested_at": "2026-04-11T13:46:08Z",
+      "windows": [
+        {
+          "window_id": "W1",
+          "period": "IS:2023-01-01..2023-06-30 VAL:2023-07-01..2023-12-31",
+          "is": {
+            "trades": 190,
+            "win_rate": 0.4842105263157895,
+            "profit_factor": 1.69,
+            "expectancy_pips": 3.9,
+            "max_drawdown_pct": 0.116,
+            "total_pnl": 11455.53,
+            "sharpe_ratio": 2.46
+          },
+          "val": {
+            "trades": 368,
+            "win_rate": 0.3967391304347826,
+            "profit_factor": 1.22,
+            "expectancy_pips": 1.3,
+            "max_drawdown_pct": 0.3304,
+            "total_pnl": 7184.15,
+            "sharpe_ratio": 1.51
+          },
+          "passed": false,
+          "fail_reason": "val_pf=1.220 <= baseline_pf=1.340"
+        },
+        {
+          "window_id": "W2",
+          "period": "IS:2024-01-01..2024-06-30 VAL:2024-07-01..2024-12-31",
+          "is": {
+            "trades": 356,
+            "win_rate": 0.3595505617977528,
+            "profit_factor": 1.1,
+            "expectancy_pips": 0.6,
+            "max_drawdown_pct": 0.2478,
+            "total_pnl": 2581.34,
+            "sharpe_ratio": 0.9
+          },
+          "val": {
+            "trades": 324,
+            "win_rate": 0.37962962962962965,
+            "profit_factor": 1.18,
+            "expectancy_pips": 1.2,
+            "max_drawdown_pct": 0.3191,
+            "total_pnl": 5112.46,
+            "sharpe_ratio": 1.35
+          },
+          "passed": false,
+          "fail_reason": "val_pf=1.180 <= baseline_pf=1.340"
+        },
+        {
+          "window_id": "W3",
+          "period": "IS:2025-01-01..2025-06-30 VAL:2025-07-01..2025-12-31",
+          "is": {
+            "trades": 339,
+            "win_rate": 0.4336283185840708,
+            "profit_factor": 1.46,
+            "expectancy_pips": 4.1,
+            "max_drawdown_pct": 0.2181,
+            "total_pnl": 15296.55,
+            "sharpe_ratio": 2.37
+          },
+          "val": {
+            "trades": 352,
+            "win_rate": 0.4034090909090909,
+            "profit_factor": 1.24,
+            "expectancy_pips": 1.3,
+            "max_drawdown_pct": 0.2815,
+            "total_pnl": 7050.57,
+            "sharpe_ratio": 1.38
+          },
+          "passed": false,
+          "fail_reason": "val_pf=1.240 <= baseline_pf=1.340"
+        }
+      ],
+      "walk_forward_pass_rate": 0.0,
+      "aggregate": {
+        "median_profit_factor": 1.22,
+        "median_win_rate": 0.3967391304347826,
+        "median_max_drawdown_pct": 0.3191,
+        "median_expectancy_pips": 1.3,
+        "windows_with_data": 3
+      },
+      "oos": null,
+      "error": null,
+      "verdict": "REJECTED_WALK_FORWARD",
+      "verdict_reason": "passed 0/3 windows (0%) < 75%",
+      "delta_vs_anchor": null,
+      "delta_vs_rolling": null,
+      "approval": null
+    },
+    {
+      "id": "T-2026-04-11-003",
+      "params_hash": "sha1:de721be2eabd0583",
+      "params": {
+        "weights": {
+          "htf_bias": 0.3338,
+          "bos": 0.1017,
+          "wave_position": 0.1539,
+          "liquidity_sweep": 0.193,
+          "sr_reaction": 0.1604,
+          "wave_ending": 0.0572,
+          "catalyst": 0.0
+        },
+        "threshold": 0.45,
+        "sl_multiplier": 1.5,
+        "tp_risk_reward": 2.25,
+        "swing_lookback": 6,
+        "regime_filter_enabled": false,
+        "regime_adx_threshold": 25.0,
+        "signal_model_enabled": false,
+        "signal_model_min_confidence": 0.5,
+        "news_filter_enabled": false,
+        "news_block_before_mins": 30,
+        "news_block_after_mins": 15,
+        "sl_method": "atr"
+      },
+      "mutation": "tp_risk_reward 2.0->2.25",
+      "tested_at": "2026-04-11T13:46:08Z",
+      "windows": [
+        {
+          "window_id": "W1",
+          "period": "IS:2023-01-01..2023-06-30 VAL:2023-07-01..2023-12-31",
+          "is": {
+            "trades": 264,
+            "win_rate": 0.4128787878787879,
+            "profit_factor": 1.46,
+            "expectancy_pips": 2.6,
+            "max_drawdown_pct": 0.3082,
+            "total_pnl": 10728.55,
+            "sharpe_ratio": 2.08
+          },
+          "val": {
+            "trades": 545,
+            "win_rate": 0.3926605504587156,
+            "profit_factor": 1.39,
+            "expectancy_pips": 2.6,
+            "max_drawdown_pct": 0.2701,
+            "total_pnl": 20385.51,
+            "sharpe_ratio": 2.71
+          },
+          "passed": true,
+          "fail_reason": null
+        },
+        {
+          "window_id": "W2",
+          "period": "IS:2024-01-01..2024-06-30 VAL:2024-07-01..2024-12-31",
+          "is": {
+            "trades": 471,
+            "win_rate": 0.3248407643312102,
+            "profit_factor": 1.06,
+            "expectancy_pips": 0.4,
+            "max_drawdown_pct": 0.366,
+            "total_pnl": 2169.49,
+            "sharpe_ratio": 0.77
+          },
+          "val": {
+            "trades": 425,
+            "win_rate": 0.31058823529411766,
+            "profit_factor": 0.96,
+            "expectancy_pips": -0.5,
+            "max_drawdown_pct": 0.4828,
+            "total_pnl": -1400.37,
+            "sharpe_ratio": -0.01
+          },
+          "passed": false,
+          "fail_reason": "val_pf=0.960 <= baseline_pf=1.340"
+        },
+        {
+          "window_id": "W3",
+          "period": "IS:2025-01-01..2025-06-30 VAL:2025-07-01..2025-12-31",
+          "is": {
+            "trades": 533,
+            "win_rate": 0.44652908067542213,
+            "profit_factor": 1.72,
+            "expectancy_pips": 6.3,
+            "max_drawdown_pct": 0.2241,
+            "total_pnl": 45300.75,
+            "sharpe_ratio": 3.6
+          },
+          "val": {
+            "trades": 484,
+            "win_rate": 0.36363636363636365,
+            "profit_factor": 1.18,
+            "expectancy_pips": 1.2,
+            "max_drawdown_pct": 0.2891,
+            "total_pnl": 7581.77,
+            "sharpe_ratio": 1.45
+          },
+          "passed": false,
+          "fail_reason": "val_pf=1.180 <= baseline_pf=1.340"
+        }
+      ],
+      "walk_forward_pass_rate": 0.3333333333333333,
+      "aggregate": {
+        "median_profit_factor": 1.18,
+        "median_win_rate": 0.36363636363636365,
+        "median_max_drawdown_pct": 0.2891,
+        "median_expectancy_pips": 1.2,
+        "windows_with_data": 3
+      },
+      "oos": null,
+      "error": null,
+      "verdict": "REJECTED_WALK_FORWARD",
+      "verdict_reason": "passed 1/3 windows (33%) < 75%",
+      "delta_vs_anchor": null,
+      "delta_vs_rolling": null,
+      "approval": null
+    },
+    {
+      "id": "T-2026-04-11-004",
+      "params_hash": "sha1:2f9b42d6ca242867",
+      "params": {
+        "weights": {
+          "htf_bias": 0.3338,
+          "bos": 0.1017,
+          "wave_position": 0.1539,
+          "liquidity_sweep": 0.193,
+          "sr_reaction": 0.1604,
+          "wave_ending": 0.0572,
+          "catalyst": 0.0
+        },
+        "threshold": 0.5,
+        "sl_multiplier": 1.5,
+        "tp_risk_reward": 2.0,
+        "swing_lookback": 6,
+        "regime_filter_enabled": false,
+        "regime_adx_threshold": 25.0,
+        "signal_model_enabled": false,
+        "signal_model_min_confidence": 0.5,
+        "news_filter_enabled": false,
+        "news_block_before_mins": 30,
+        "news_block_after_mins": 15,
+        "sl_method": "atr"
+      },
+      "mutation": "threshold 0.45->0.5",
+      "tested_at": "2026-04-11T13:46:08Z",
+      "windows": [
+        {
+          "window_id": "W1",
+          "period": "IS:2023-01-01..2023-06-30 VAL:2023-07-01..2023-12-31",
+          "is": {
+            "trades": 133,
+            "win_rate": 0.48120300751879697,
+            "profit_factor": 1.54,
+            "expectancy_pips": 3.1,
+            "max_drawdown_pct": 0.1521,
+            "total_pnl": 6155.14,
+            "sharpe_ratio": 1.59
+          },
+          "val": {
+            "trades": 338,
+            "win_rate": 0.4171597633136095,
+            "profit_factor": 1.38,
+            "expectancy_pips": 2.5,
+            "max_drawdown_pct": 0.268,
+            "total_pnl": 11424.62,
+            "sharpe_ratio": 2.07
+          },
+          "passed": true,
+          "fail_reason": null
+        },
+        {
+          "window_id": "W2",
+          "period": "IS:2024-01-01..2024-06-30 VAL:2024-07-01..2024-12-31",
+          "is": {
+            "trades": 360,
+            "win_rate": 0.3638888888888889,
+            "profit_factor": 1.14,
+            "expectancy_pips": 0.8,
+            "max_drawdown_pct": 0.2209,
+            "total_pnl": 3614.41,
+            "sharpe_ratio": 1.1
+          },
+          "val": {
+            "trades": 314,
+            "win_rate": 0.3535031847133758,
+            "profit_factor": 1.06,
+            "expectancy_pips": 0.2,
+            "max_drawdown_pct": 0.3823,
+            "total_pnl": 1380.62,
+            "sharpe_ratio": 0.58
+          },
+          "passed": false,
+          "fail_reason": "val_pf=1.060 <= baseline_pf=1.340"
+        },
+        {
+          "window_id": "W3",
+          "period": "IS:2025-01-01..2025-06-30 VAL:2025-07-01..2025-12-31",
+          "is": {
+            "trades": 341,
+            "win_rate": 0.45454545454545453,
+            "profit_factor": 1.54,
+            "expectancy_pips": 5.1,
+            "max_drawdown_pct": 0.2105,
+            "total_pnl": 19329.68,
+            "sharpe_ratio": 2.67
+          },
+          "val": {
+            "trades": 326,
+            "win_rate": 0.4294478527607362,
+            "profit_factor": 1.4,
+            "expectancy_pips": 2.0,
+            "max_drawdown_pct": 0.2705,
+            "total_pnl": 10646.69,
+            "sharpe_ratio": 1.75
+          },
+          "passed": true,
+          "fail_reason": null
+        }
+      ],
+      "walk_forward_pass_rate": 0.6666666666666666,
+      "aggregate": {
+        "median_profit_factor": 1.38,
+        "median_win_rate": 0.4171597633136095,
+        "median_max_drawdown_pct": 0.2705,
+        "median_expectancy_pips": 2.0,
+        "windows_with_data": 3
+      },
+      "oos": null,
+      "error": null,
+      "verdict": "REJECTED_WALK_FORWARD",
+      "verdict_reason": "passed 2/3 windows (67%) < 75%",
+      "delta_vs_anchor": null,
+      "delta_vs_rolling": null,
+      "approval": null
+    },
+    {
+      "id": "T-2026-04-11-005",
+      "params_hash": "sha1:eb23f818e11f03a3",
+      "params": {
+        "weights": {
+          "htf_bias": 0.3338,
+          "bos": 0.1017,
+          "wave_position": 0.1539,
+          "liquidity_sweep": 0.193,
+          "sr_reaction": 0.1604,
+          "wave_ending": 0.0572,
+          "catalyst": 0.0
+        },
+        "threshold": 0.45,
+        "sl_multiplier": 1.5,
+        "tp_risk_reward": 2.0,
+        "swing_lookback": 6,
+        "regime_filter_enabled": false,
+        "regime_adx_threshold": 25.0,
+        "signal_model_enabled": false,
+        "signal_model_min_confidence": 0.5,
+        "news_filter_enabled": true,
+        "news_block_before_mins": 30,
+        "news_block_after_mins": 15,
+        "sl_method": "atr"
+      },
+      "mutation": "news_filter ON",
+      "tested_at": "2026-04-11T13:46:08Z",
+      "windows": [
+        {
+          "window_id": "W1",
+          "period": "IS:2023-01-01..2023-06-30 VAL:2023-07-01..2023-12-31",
+          "is": {
+            "trades": 281,
+            "win_rate": 0.4306049822064057,
+            "profit_factor": 1.4,
+            "expectancy_pips": 1.9,
+            "max_drawdown_pct": 0.2644,
+            "total_pnl": 9333.37,
+            "sharpe_ratio": 1.91
+          },
+          "val": {
+            "trades": 547,
+            "win_rate": 0.42413162705667273,
+            "profit_factor": 1.35,
+            "expectancy_pips": 2.3,
+            "max_drawdown_pct": 0.2724,
+            "total_pnl": 18040.71,
+            "sharpe_ratio": 2.64
+          },
+          "passed": true,
+          "fail_reason": null
+        },
+        {
+          "window_id": "W2",
+          "period": "IS:2024-01-01..2024-06-30 VAL:2024-07-01..2024-12-31",
+          "is": {
+            "trades": 480,
+            "win_rate": 0.35208333333333336,
+            "profit_factor": 1.08,
+            "expectancy_pips": 0.4,
+            "max_drawdown_pct": 0.3398,
+            "total_pnl": 2559.73,
+            "sharpe_ratio": 0.87
+          },
+          "val": {
+            "trades": 477,
+            "win_rate": 0.34591194968553457,
+            "profit_factor": 1.0,
+            "expectancy_pips": -0.4,
+            "max_drawdown_pct": 0.489,
+            "total_pnl": 14.12,
+            "sharpe_ratio": 0.33
+          },
+          "passed": false,
+          "fail_reason": "val_pf=1.000 <= baseline_pf=1.340"
+        },
+        {
+          "window_id": "W3",
+          "period": "IS:2025-01-01..2025-06-30 VAL:2025-07-01..2025-12-31",
+          "is": {
+            "trades": 562,
+            "win_rate": 0.4483985765124555,
+            "profit_factor": 1.52,
+            "expectancy_pips": 4.5,
+            "max_drawdown_pct": 0.2589,
+            "total_pnl": 31392.43,
+            "sharpe_ratio": 3.07
+          },
+          "val": {
+            "trades": 505,
+            "win_rate": 0.39603960396039606,
+            "profit_factor": 1.24,
+            "expectancy_pips": 1.6,
+            "max_drawdown_pct": 0.243,
+            "total_pnl": 10334.37,
+            "sharpe_ratio": 1.68
+          },
+          "passed": false,
+          "fail_reason": "val_pf=1.240 <= baseline_pf=1.340"
+        }
+      ],
+      "walk_forward_pass_rate": 0.3333333333333333,
+      "aggregate": {
+        "median_profit_factor": 1.24,
+        "median_win_rate": 0.39603960396039606,
+        "median_max_drawdown_pct": 0.2724,
+        "median_expectancy_pips": 1.6,
+        "windows_with_data": 3
+      },
+      "oos": null,
+      "error": null,
+      "verdict": "REJECTED_WALK_FORWARD",
+      "verdict_reason": "passed 1/3 windows (33%) < 75%",
+      "delta_vs_anchor": null,
+      "delta_vs_rolling": null,
+      "approval": null
     }
   ],
-  "rejected_blacklist": []
+  "rejected_blacklist": [],
+  "strategy_insights": {
+    "learner_proposals_history": [],
+    "EURUSD": {
+      "rolling_90d_summary": {},
+      "per_regime_performance": {},
+      "feature_importance": {}
+    },
+    "AUDUSD": {
+      "rolling_90d_summary": {},
+      "per_regime_performance": {},
+      "feature_importance": {}
+    },
+    "GBPUSD": {
+      "rolling_90d_summary": {},
+      "per_regime_performance": {},
+      "feature_importance": {}
+    },
+    "XAUUSD": {
+      "rolling_90d_summary": {},
+      "per_regime_performance": {},
+      "feature_importance": {}
+    },
+    "US30": {
+      "rolling_90d_summary": {},
+      "per_regime_performance": {},
+      "feature_importance": {}
+    },
+    "WTICO": {
+      "rolling_90d_summary": {},
+      "per_regime_performance": {},
+      "feature_importance": {}
+    }
+  }
 }

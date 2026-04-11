@@ -23,7 +23,7 @@ from research import history
 from research.parameter_agent import generate_candidates
 from research.backtest_runner import run_batch
 from research.validation_agent import evaluate
-from research.promotion import apply_decisions, push_promotion
+from research.promotion import apply_decisions, push_promotion, auto_apply_promotion
 
 REPORTS_DIR = Path(__file__).parent.parent / "reports" / "research"
 
@@ -137,8 +137,13 @@ def run(budget: int | None = None, dry_run: bool = False, seed: int | None = Non
     print("\nRunning backtests across walk-forward windows + OOS...")
     results = run_batch(candidates, data)
 
+    # Check if auto-promotion is enabled (from optimized_params.json)
+    from config.params import load_strategy_params as _load_params
+    auto_promote_enabled = _load_params().get("auto_promote_enabled", False)
+
     history_entries: list[dict] = []
     promoted_count = 0
+    auto_promoted_count = 0
     flagged_count = 0
     rejected_count = 0
     next_approval_n = 1
@@ -152,7 +157,20 @@ def run(budget: int | None = None, dry_run: bool = False, seed: int | None = Non
         entry["delta_vs_anchor"] = verdict.delta_vs_anchor
         entry["delta_vs_rolling"] = verdict.delta_vs_rolling
 
-        if verdict.code == "PROMOTED_CANDIDATE":
+        if verdict.code == "AUTO_PROMOTED" and auto_promote_enabled:
+            # Apply immediately — no approval queue
+            applied = auto_apply_promotion(entry, data)
+            entry["approval"] = {
+                "status": "AUTO_APPLIED" if applied else "AUTO_APPLY_FAILED",
+                "applied_at": _utcnow_iso() if applied else None,
+            }
+            auto_promoted_count += 1
+            if applied:
+                print(f"  AUTO-PROMOTED: {r.candidate.mutation_summary}")
+                # Re-sync baseline so subsequent candidates compare against new params
+                data = history.sync_rolling_baseline(data)
+        elif verdict.code in ("AUTO_PROMOTED", "PROMOTED_CANDIDATE"):
+            # AUTO_PROMOTED but auto-promote disabled, or normal PROMOTED
             approval_id = f"R{next_approval_n}"
             entry["approval"] = {
                 "status": "PENDING",
@@ -185,6 +203,7 @@ def run(budget: int | None = None, dry_run: bool = False, seed: int | None = Non
     summary = {
         "tested": len(results),
         "promoted": promoted_count,
+        "auto_promoted": auto_promoted_count,
         "flagged": flagged_count,
         "rejected": rejected_count,
         "report": str(report_path),

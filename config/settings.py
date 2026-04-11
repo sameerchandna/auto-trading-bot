@@ -52,6 +52,28 @@ ATR_PERIOD = 14                   # ATR for volatility measurement
 SL_ATR_MULTIPLIER = 1.5          # Stop loss = entry +/- ATR * multiplier
 TP_RISK_REWARD = 2.0             # Take profit = 2:1 risk/reward minimum
 
+# Regime filter (toggleable — disabled by default until backtested)
+REGIME_FILTER_ENABLED = False    # When True, block signals in ranging markets
+REGIME_ADX_THRESHOLD = 25.0      # ADX below this = ranging (Wilder's classic)
+REGIME_ADX_TIMEFRAME = "4h"      # Which TF to read ADX from
+
+# Regime-aware parameter switching (per-regime overrides for SL/TP/threshold)
+REGIME_PARAMS_ENABLED = False    # When True, apply per-regime param overrides
+ATR_VOLATILITY_THRESHOLD = 80.0  # ATR percentile above this = VOLATILE regime
+DEFAULT_REGIME_PARAMS = {
+    "trending": {},              # Empty = use base params unchanged
+    "ranging": {},               # Will be populated by research agent
+    "volatile": {},              # Will be populated by research agent
+}
+
+# News filter (toggleable — disabled by default until backtested)
+NEWS_FILTER_ENABLED = False      # When True, block signals around high-impact news
+NEWS_BLOCK_BEFORE_MINS = 30      # Minutes before event to block
+NEWS_BLOCK_AFTER_MINS = 15       # Minutes after event to block
+
+# Auto-promotion (research pipeline applies winners without manual approval)
+AUTO_PROMOTE_ENABLED = False     # When True, AUTO_PROMOTED candidates apply immediately
+
 # Confluence weights (learnable)
 CONFLUENCE_WEIGHTS = {
     "htf_bias": 0.25,            # Higher timeframe bias alignment
@@ -76,6 +98,11 @@ PARAM_BOUNDS = {
     "sr_reaction_weight": (0.05, 0.20),
     "catalyst_weight": (0.0, 0.20),
     "wave_ending_weight": (0.0, 0.15),
+    "regime_adx_threshold": (15.0, 35.0),
+    "signal_model_min_confidence": (0.35, 0.65),
+    "news_block_before_mins": (15, 60),
+    "news_block_after_mins": (5, 30),
+    "atr_volatility_threshold": (60.0, 95.0),
 }
 
 # Data fetching — always OANDA, fixed start dates matched to EURUSD history depth
@@ -92,6 +119,11 @@ HISTORY_START = {
 MIN_TRADES_FOR_STATS = 30         # Minimum trades before computing setup stats
 OPTIMIZATION_INTERVAL = 50        # Re-optimize after N completed trades
 LEARNING_RATE = 0.1               # How fast parameters adjust
+LEARNER_ENABLED = False            # Learner defaults to frozen (stats-only)
+LEARNER_MAX_WEIGHT_DELTA = 0.05   # Max weight change per factor per cycle
+LEARNER_DD_KILL_PCT = 0.15        # Freeze learner if rolling DD exceeds 15%
+LEARNER_MIN_WR_FOR_BOOST = 0.45   # Only boost weights for setups with WR >= this
+LEARNER_MIN_PF_FOR_BOOST = 1.20   # Only boost weights for setups with PF >= this
 
 # Dashboard
 DASHBOARD_HOST = "127.0.0.1"

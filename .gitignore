@@ -12,3 +12,4 @@ venv/
 .vscode/
 *.log
 storage/*.db
+models/*.pkl

@@ -59,9 +59,13 @@ class RiskManagerAgent(BaseAgent):
     def _validate_and_size(self, signal: Signal) -> Position | None:
         """Validate signal against risk rules and calculate position size."""
 
+        from storage.database import log_audit
+
         # Check daily loss limit (only triggers on losses, not profits)
         if self.daily_pnl < 0 and abs(self.daily_pnl) >= self.capital * DAILY_LOSS_LIMIT:
             self.logger.warning("DAILY LOSS LIMIT reached - rejecting signal")
+            log_audit("risk_manager", "signal_rejected", pair=signal.pair,
+                      details={"reason": "daily_loss_limit"})
             return None
 
         # Check weekly loss limit
@@ -74,12 +78,16 @@ class RiskManagerAgent(BaseAgent):
             self.logger.warning(
                 f"Max concurrent positions ({MAX_CONCURRENT_POSITIONS}) reached"
             )
+            log_audit("risk_manager", "signal_rejected", pair=signal.pair,
+                      details={"reason": "max_concurrent_positions"})
             return None
 
         # Check total portfolio risk
         total_risk = sum(p.risk_amount for p in self.open_positions)
         if total_risk >= self.capital * MAX_PORTFOLIO_RISK:
             self.logger.warning("Max portfolio risk reached")
+            log_audit("risk_manager", "signal_rejected", pair=signal.pair,
+                      details={"reason": "max_portfolio_risk"})
             return None
 
         # Calculate position size
@@ -123,6 +131,13 @@ class RiskManagerAgent(BaseAgent):
             f"risk=£{risk_per_trade:.2f} | "
             f"SL={sl_pips:.1f} pips"
         )
+
+        log_audit("risk_manager", "position_approved", pair=signal.pair, details={
+            "direction": signal.direction.value,
+            "size": round(size_units, 0),
+            "risk_gbp": round(risk_per_trade, 2),
+            "sl_pips": round(sl_pips, 1),
+        })
 
         return position
 

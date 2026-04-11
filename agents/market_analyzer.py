@@ -15,6 +15,8 @@ class MarketAnalyzerAgent(BaseAgent):
     def __init__(self):
         super().__init__("market_analyzer")
         self.last_context: PriceContext | None = None
+        self.adx_threshold: float = 25.0
+        self.atr_volatility_threshold: float = 80.0
 
     def process(self, data: dict) -> dict:
         """Analyze candles across all timeframes.
@@ -28,9 +30,20 @@ class MarketAnalyzerAgent(BaseAgent):
             return {"context": None}
 
         self.logger.info("Running multi-timeframe analysis...")
-        context = build_price_context(candles)
+        context = build_price_context(
+            candles,
+            adx_threshold=self.adx_threshold,
+            atr_volatility_threshold=self.atr_volatility_threshold,
+        )
         self.last_context = context
 
         bus.publish("analysis_complete", context)
+
+        from storage.database import log_audit
+        log_audit("market_analyzer", "analysis_complete", pair=context.pair, details={
+            "regime": context.regime.value if context.regime else None,
+            "bias": context.overall_bias.value,
+            "bias_strength": round(context.bias_strength, 3),
+        })
 
         return {"context": context}

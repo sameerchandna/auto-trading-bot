@@ -4,7 +4,7 @@ from datetime import datetime
 
 from data.models import (
     PriceContext, Signal, Direction, SignalType, Bias,
-    WavePhase, StructureBreak,
+    WavePhase, StructureBreak, Regime,
 )
 from analysis.support_resistance import price_at_zone, find_nearest_sr
 from analysis.wave_endings import is_wave_exhausted
@@ -24,11 +24,26 @@ def score_confluence(
     sl_atr_mult: float | None = None,
     tp_rr: float | None = None,
     sl_method: str = "atr",
+    regime_filter_enabled: bool = False,
+    regime_params_enabled: bool = False,
+    regime_params: dict[str, dict] | None = None,
+    signal_model_enabled: bool = False,
+    signal_model_min_confidence: float = 0.5,
+    news_filter_enabled: bool = False,
+    news_block_before_mins: int = 30,
+    news_block_after_mins: int = 15,
+    current_time: datetime | None = None,
 ) -> list[Signal]:
     """Score all possible setups and return signals that meet threshold.
 
     Evaluates multiple factors across timeframes and generates
     signals when confluence is strong enough.
+
+    When regime_filter_enabled is True, signals are blocked if the market
+    regime is RANGING (ADX below threshold on the reference TF).
+
+    When regime_params_enabled is True, per-regime overrides (threshold,
+    sl_multiplier, tp_risk_reward) are merged on top of base params.
     """
     if weights is None:
         weights = CONFLUENCE_WEIGHTS
@@ -41,7 +56,33 @@ def score_confluence(
     if tp_rr is None:
         tp_rr = TP_RISK_REWARD
 
+    # Apply regime-specific param overrides
+    if regime_params_enabled and regime_params:
+        regime_key = context.regime.value  # "trending", "ranging", or "volatile"
+        overrides = regime_params.get(regime_key, {})
+        if overrides:
+            threshold = overrides.get("threshold", threshold)
+            sl_atr_mult = overrides.get("sl_multiplier", sl_atr_mult)
+            tp_rr = overrides.get("tp_risk_reward", tp_rr)
+            logger.debug(
+                f"Regime override ({regime_key}): threshold={threshold}, "
+                f"sl_mult={sl_atr_mult}, tp_rr={tp_rr}"
+            )
+
     signals = []
+
+    # Regime filter — skip signal generation entirely when market is ranging
+    if regime_filter_enabled and context.regime == Regime.RANGING:
+        logger.debug("Regime filter: RANGING — skipping signal generation")
+        return signals
+
+    # News filter — skip signal generation during high-impact news windows
+    if news_filter_enabled:
+        from data.economic_calendar import is_news_blocked
+        check_time = current_time or context.timestamp
+        if is_news_blocked(check_time, news_block_before_mins, news_block_after_mins):
+            logger.debug("News filter: high-impact event window — skipping")
+            return signals
 
     # Find the lowest available timeframe as entry TF
     tf_priority = ["15m", "1h", "4h", "1d", "1wk"]
@@ -79,6 +120,18 @@ def score_confluence(
             sl_atr_mult=sl_atr_mult, tp_rr=tp_rr, sl_method=sl_method,
         )
         if signal:
+            # Model-based confidence filter
+            if signal_model_enabled:
+                from analysis.signal_model import predict_win_probability
+                prob = predict_win_probability(signal)
+                if prob is not None:
+                    signal.rationale["model_confidence"] = prob
+                    if prob < signal_model_min_confidence:
+                        logger.debug(
+                            f"Model filter: P(win)={prob:.3f} < {signal_model_min_confidence} — "
+                            f"rejecting {signal.direction.value} signal"
+                        )
+                        return signals  # empty
             signals.append(signal)
 
     return signals
@@ -306,6 +359,10 @@ def _build_signal(
         rationale={
             "overall_bias": context.overall_bias.value,
             "bias_strength": context.bias_strength,
+            "regime": context.regime.value,
+            "scores": scores or {},
+            "adx": (context.analyses.get(trigger_tf) or context.analyses.get(entry_tf_name, type("", (), {"adx": 0})())).adx,
+            "atr": atr,
         },
         entry_timeframe=entry_tf_name,
         trigger_timeframe=trigger_tf,
